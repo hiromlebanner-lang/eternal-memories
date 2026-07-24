@@ -174,6 +174,28 @@ as $$
   limit 1;
 $$;
 
+create or replace function public.can_view_profile(target_user_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select
+    auth.uid() is not null
+    and (
+      target_user_id = auth.uid()
+      or exists (
+        select 1
+        from public.album_members as mine
+        join public.album_members as target
+          on target.album_id = mine.album_id
+        where mine.user_id = auth.uid()
+          and target.user_id = target_user_id
+      )
+    );
+$$;
+
 create or replace function public.join_album_by_code(p_invite_code text)
 returns uuid
 language plpgsql
@@ -207,17 +229,37 @@ $$;
 
 revoke all on function public.join_album_by_code(text) from public;
 grant execute on function public.join_album_by_code(text) to authenticated;
+revoke all on function public.is_album_member(uuid) from public;
+revoke all on function public.current_album_role(uuid) from public;
+revoke all on function public.can_view_profile(uuid) from public;
+grant execute on function public.is_album_member(uuid) to authenticated;
+grant execute on function public.current_album_role(uuid) to authenticated;
+grant execute on function public.can_view_profile(uuid) to authenticated;
+revoke all on function public.set_updated_at() from public;
+revoke all on function public.handle_new_user() from public;
+revoke all on function public.add_album_creator_as_admin() from public;
 
 alter table public.profiles enable row level security;
 alter table public.albums enable row level security;
 alter table public.album_members enable row level security;
 alter table public.photos enable row level security;
 
+revoke all on table public.profiles from anon;
+revoke all on table public.albums from anon;
+revoke all on table public.album_members from anon;
+revoke all on table public.photos from anon;
+
+grant select, update on table public.profiles to authenticated;
+grant select, insert, update, delete on table public.albums to authenticated;
+grant select, insert, update, delete on table public.album_members to authenticated;
+grant select, insert, update, delete on table public.photos to authenticated;
+
 drop policy if exists "authenticated profiles are visible" on public.profiles;
-create policy "authenticated profiles are visible"
+drop policy if exists "album members view related profiles" on public.profiles;
+create policy "album members view related profiles"
 on public.profiles for select
 to authenticated
-using (true);
+using ((select public.can_view_profile(id)));
 
 drop policy if exists "users update own profile" on public.profiles;
 create policy "users update own profile"
@@ -271,7 +313,11 @@ using (public.current_album_role(album_id) = 'admin')
 with check (
   public.current_album_role(album_id) = 'admin'
   and (
-    user_id <> (select created_by from public.albums where id = album_id)
+    user_id <> (
+      select target_album.created_by
+      from public.albums as target_album
+      where target_album.id = album_members.album_id
+    )
     or role = 'admin'
   )
 );
@@ -309,7 +355,10 @@ using (
   or public.current_album_role(album_id) = 'admin'
 )
 with check (
-  author_id = auth.uid()
+  (
+    author_id = auth.uid()
+    and public.current_album_role(album_id) in ('admin', 'editor')
+  )
   or public.current_album_role(album_id) = 'admin'
 );
 

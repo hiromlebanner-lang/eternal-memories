@@ -13,14 +13,12 @@ const ROLE_LABEL: Record<AlbumRole, string> = {
 interface MemberManagerProps {
   album: Album;
   currentUser: AppUser;
-  demoMode: boolean;
   onClose: () => void;
 }
 
 export function MemberManager({
   album,
   currentUser,
-  demoMode,
   onClose,
 }: MemberManagerProps) {
   const [members, setMembers] = useState<AlbumMember[]>([]);
@@ -32,34 +30,7 @@ export function MemberManager({
     let active = true;
     const run = async () => {
       try {
-        const next = demoMode
-          ? [
-              {
-                album_id: album.id,
-                user_id: currentUser.id,
-                role: "admin" as const,
-                joined_at: album.created_at,
-                display_name: currentUser.displayName,
-                email: currentUser.email,
-              },
-              {
-                album_id: album.id,
-                user_id: "demo-editor",
-                role: "editor" as const,
-                joined_at: album.created_at,
-                display_name: "ゆうき",
-                email: "yuuki@example.com",
-              },
-              {
-                album_id: album.id,
-                user_id: "demo-viewer",
-                role: "viewer" as const,
-                joined_at: album.created_at,
-                display_name: "あおい",
-                email: "aoi@example.com",
-              },
-            ]
-          : await loadMembers(album.id);
+        const next = await loadMembers(album.id);
         if (active) setMembers(next);
       } catch (caught) {
         if (active) {
@@ -73,13 +44,13 @@ export function MemberManager({
     return () => {
       active = false;
     };
-  }, [album.created_at, album.id, currentUser, demoMode]);
+  }, [album.id]);
 
   const setRole = async (member: AlbumMember, role: AlbumRole) => {
     setChangingID(member.user_id);
     setError("");
     try {
-      if (!demoMode) await changeMemberRole(album.id, member.user_id, role);
+      await changeMemberRole(album.id, member.user_id, role);
       setMembers((current) =>
         current.map((candidate) =>
           candidate.user_id === member.user_id ? { ...candidate, role } : candidate,

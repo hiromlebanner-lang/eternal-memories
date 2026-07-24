@@ -7,7 +7,11 @@ React、TypeScript、Vite、Leaflet、Supabaseで作られています。Windows
 ## 実装済み機能
 
 - メールアドレス・パスワードによる登録／ログイン
+- 登録メールの確認（Email Verification）
+- パスワード再設定メールと新しいパスワードの登録
 - Googleログイン
+- Appleログイン
+- ログイン状態の保持とログアウト
 - 共有アルバムの作成
 - 招待コード・QRコード・共有リンクによる参加
 - 管理者、編集者、閲覧者の権限
@@ -27,7 +31,7 @@ React、TypeScript、Vite、Leaflet、Supabaseで作られています。Windows
 - 一度表示した地図タイル、写真、アルバム情報のオフライン閲覧
 - Supabase Realtimeによる写真更新の自動反映
 
-Supabaseが未設定でも「デモを開く」から完成画面を確認できます。デモモードの変更は再読み込みすると元に戻ります。
+未ログイン状態ではアルバム、写真、メンバー情報を表示しません。ログアウト時には端末内の写真・アルバムキャッシュも削除します。
 
 ---
 
@@ -59,7 +63,7 @@ npm install
 
 初回は数分かかることがあります。
 
-### 1-4. まずデモを起動
+### 1-4. 開発画面を起動
 
 ```powershell
 npm run dev
@@ -71,7 +75,7 @@ PowerShellに表示された次のようなURLをブラウザーで開きます�
 http://localhost:5173/
 ```
 
-Supabaseをまだ設定していない場合は、ログイン画面の「デモを開く」を押してください。
+Supabaseが未設定の場合はログイン画面だけが表示され、アルバムデータは閲覧できません。先に「2. Supabaseの設定方法」を完了してください。
 
 停止するときはPowerShellで `Ctrl + C` を押します。
 
@@ -131,12 +135,20 @@ SQLを複数回実行しても主要なテーブルとポリシーは作り直�
 
 ### 2-3. メールログインを設定
 
-1. Supabase左メニューの `Authentication`
-2. `Providers`
-3. `Email` を有効にする
-4. 本番運用では `Confirm email` を有効にする
+1. Supabase左メニューの `Authentication` → `Providers` を開く
+2. `Email` を有効にする
+3. `Confirm email` を必ず有効にする
+4. `Secure email change` も有効にする
+5. `Authentication` → `Email Templates` で次のメールを確認する
+   - `Confirm signup`
+   - `Reset password`
+   - `Change email address`
 
-開発中に確認メールを省略したい場合だけ、一時的に `Confirm email` を無効にできます。
+`Confirm email` が有効な場合、新規登録直後にはログインセッションが作成されません。利用者が確認メール内のリンクを開いた後にログイン可能になります。本番運用では無効にしないでください。
+
+Supabase標準のメール送信は開発・試験向けの制限があります。本番運用では `Project Settings` → `Auth` → `SMTP Settings` で独自SMTPを設定してください。
+
+パスワード再設定は、ログイン画面の「パスワードを忘れた場合」から行います。再設定メールのリンクを開くとMapAlbumへ戻り、新しいパスワード入力画面が表示されます。
 
 ### 2-4. Googleログインを設定
 
@@ -156,7 +168,36 @@ SupabaseのCallback URLは通常、次の形式です。
 https://あなたのプロジェクトID.supabase.co/auth/v1/callback
 ```
 
-### 2-5. アプリへSupabase接続情報を設定
+公開URLはGoogle Cloud Consoleの「承認済みのJavaScript生成元」にも追加してください。
+
+### 2-5. Appleログインを設定
+
+Web版のAppleログインにはApple Developer Programのアカウントが必要です。
+
+1. [Apple Developer](https://developer.apple.com/account/)の `Certificates, Identifiers & Profiles` を開く
+2. `Identifiers` でApp IDを作成し、`Sign in with Apple` Capabilityを有効にする
+3. Web用のServices IDを作成する
+4. Services IDの `Sign in with Apple` 設定で、Primary App IDを関連付ける
+5. Website DomainへSupabaseプロジェクトのドメインを登録する
+
+```text
+あなたのプロジェクトID.supabase.co
+```
+
+6. Return URLへSupabaseのCallback URLを登録する
+
+```text
+https://あなたのプロジェクトID.supabase.co/auth/v1/callback
+```
+
+7. Apple Developerの `Keys` でSign in with Apple用キーを作り、`.p8` ファイルを安全に保存する
+8. Team ID、Key ID、Services ID、`.p8`を使ってApple Client Secretを生成する
+9. Supabaseの `Authentication` → `Providers` → `Apple` を開く
+10. Services IDをClient IDとして入力し、生成したSecretを入力して有効化する
+
+AppleのWeb OAuth用Client Secretは6か月ごとの更新が必要です。期限切れ前に更新する予定を必ず登録してください。Apple OAuthでは氏名が返らない場合があるため、MapAlbumはメールアドレスの先頭部分を表示名の初期値として使用します。
+
+### 2-6. アプリへSupabase接続情報を設定
 
 Supabaseで `Project Settings` → `Data API` または `API` を開き、次を確認します。
 
@@ -188,7 +229,7 @@ npm run dev
 
 ログイン画面からユーザー登録できれば接続完了です。
 
-### 2-6. 認証URLを設定
+### 2-7. 認証URLを設定
 
 Supabaseの `Authentication` → `URL Configuration` で設定します。
 
@@ -209,9 +250,54 @@ http://localhost:5173/**
 ```text
 https://mapalbum.pages.dev/**
 https://mapalbum.vercel.app/**
+https://あなたの独自ドメイン/**
 ```
 
-Googleログイン後に別の画面へ移動してしまう場合は、このURL設定を最初に確認してください。
+Email Verification、パスワード再設定、Googleログイン、Appleログインはすべてこの許可リストを使用します。ログイン後に別の画面へ移動する場合は、このURL設定を最初に確認してください。
+
+### 2-8. RLSとPrivate Storageを確認
+
+`supabase/schema.sql` は次の防御を設定します。
+
+- `profiles`、`albums`、`album_members`、`photos` の全テーブルでRLSを有効化
+- `anon` ロールから全テーブル権限を削除
+- RLSポリシーの対象を `authenticated` のみに限定
+- 同じアルバムに参加していないユーザーのデータを拒否
+- `album-photos` StorageバケットをPrivateに固定
+- Storageの閲覧・投稿・削除にもアルバム権限を適用
+- 写真表示には1時間だけ有効な署名付きURLを使用
+
+SQL Editorで次を実行すると、RLSとStorage設定を確認できます。
+
+```sql
+select schemaname, tablename, rowsecurity
+from pg_tables
+where schemaname = 'public'
+order by tablename;
+
+select id, name, public
+from storage.buckets
+where id = 'album-photos';
+```
+
+`profiles`、`albums`、`album_members`、`photos` の `rowsecurity` がすべて `true`、`album-photos` の `public` が `false` なら正しく設定されています。
+
+確認後、次のテストを行ってください。
+
+1. ログアウト状態でアルバムや写真が表示されない
+2. メール登録後、確認メールを開くまではログインできない
+3. パスワード再設定メールから新しいパスワードを登録できる
+4. GoogleとAppleの両方でログインできる
+5. アルバムに参加していない別ユーザーから写真を取得できない
+
+公式資料:
+
+- [Supabase Auth JavaScript](https://supabase.com/docs/reference/javascript/auth)
+- [パスワード再設定](https://supabase.com/docs/reference/javascript/auth-resetpasswordforemail)
+- [Googleログイン](https://supabase.com/docs/guides/auth/social-login/auth-google)
+- [Appleログイン](https://supabase.com/docs/guides/auth/social-login/auth-apple)
+- [Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)
+- [Storage Access Control](https://supabase.com/docs/guides/storage/security/access-control)
 
 ---
 
@@ -345,6 +431,8 @@ PWAは次のデータを端末へキャッシュします。
 - 一度表示した地図範囲を見る
 - 検索と地図／一覧切り替え
 
+オフライン閲覧にも保存済みのログインセッションが必要です。ログアウトすると、Private写真、アルバム情報、署名付きURLの端末キャッシュを削除します。共有端末では利用後に必ずログアウトしてください。
+
 オンライン接続が必要な操作:
 
 - ログイン
@@ -416,6 +504,9 @@ PWAとして使う段階ではMacやXcodeは不要です。App Storeへの最終
 - `.env.local` をメールやGitHubで公開しない
 - `service_role` キーをブラウザーへ設定しない
 - SupabaseのRLSを無効にしない
+- Email Providerの `Confirm email` を無効にしない
+- Apple Client Secretを6か月ごとに更新する
+- Supabase Authの本番メール送信には独自SMTPを設定する
 - 不要になったメンバーはアルバムから削除する
 - 正確な緯度経度がメンバーへ共有されることを利用者へ説明する
 - Supabase Dashboardから定期的にデータベースのバックアップ設定を確認する

@@ -380,6 +380,13 @@ img {
   margin-top: 20px;
 }
 
+.auth-intro {
+  margin: 18px 0 0;
+  color: var(--text-secondary);
+  font-size: 13px;
+  line-height: 1.65;
+}
+
 .auth-form label,
 .field {
   display: grid;
@@ -451,6 +458,44 @@ img {
   background: var(--surface);
 }
 
+.social-auth-buttons {
+  display: grid;
+  gap: 10px;
+}
+
+.apple-auth-button {
+  color: var(--text);
+}
+
+.apple-mark {
+  font-size: 24px;
+  line-height: 0.8;
+}
+
+.forgot-password-button,
+.back-to-login {
+  display: inline-flex;
+  width: fit-content;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  color: var(--accent-deep);
+  background: transparent;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.forgot-password-button {
+  margin-top: -7px;
+  justify-self: end;
+}
+
+.back-to-login {
+  justify-self: center;
+}
+
 .danger-button {
   border: 1px solid rgb(217 45 63 / 24%);
   color: var(--danger);
@@ -476,32 +521,6 @@ img {
   flex: 1;
   background: var(--line);
   content: "";
-}
-
-.demo-entry {
-  margin-top: 18px;
-  padding: 14px;
-  border-radius: 16px;
-  color: var(--text-secondary);
-  background: var(--accent-soft);
-  font-size: 12px;
-  line-height: 1.55;
-}
-
-.demo-entry p {
-  margin: 0 0 10px;
-}
-
-.demo-entry button {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0;
-  border: 0;
-  color: var(--accent-deep);
-  background: transparent;
-  cursor: pointer;
-  font-weight: 750;
 }
 
 .auth-footnote {
@@ -651,8 +670,7 @@ img {
   object-fit: cover;
 }
 
-.offline-banner,
-.demo-banner {
+.offline-banner {
   display: flex;
   align-items: center;
   justify-content: center;
@@ -666,25 +684,6 @@ img {
 .offline-banner {
   color: #fff;
   background: #705f59;
-}
-
-.demo-banner {
-  color: #7a5238;
-  background: #ffe4b6;
-}
-
-:root[data-theme="dark"] .demo-banner {
-  color: #ffd7a3;
-  background: #4a3829;
-}
-
-.demo-banner span {
-  padding: 2px 6px;
-  border-radius: 999px;
-  color: white;
-  background: #c4783d;
-  font-size: 9px;
-  letter-spacing: 0.05em;
 }
 
 .app-main {

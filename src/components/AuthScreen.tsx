@@ -1,45 +1,84 @@
-import { ArrowRight, Chrome, LockKeyhole, Mail, Map, Sparkles } from "lucide-react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Chrome,
+  KeyRound,
+  LockKeyhole,
+  Mail,
+  Map,
+  Sparkles,
+} from "lucide-react";
 import { useState, type FormEvent } from "react";
 
+type AuthMode = "login" | "signup" | "forgot";
+
 interface AuthScreenProps {
-  demoMode: boolean;
+  configured: boolean;
   busy: boolean;
   message?: string;
+  recoveryMode: boolean;
   onEmailLogin: (email: string, password: string) => Promise<void>;
   onEmailSignup: (
     displayName: string,
     email: string,
     password: string,
   ) => Promise<void>;
+  onPasswordResetRequest: (email: string) => Promise<void>;
+  onPasswordUpdate: (password: string) => Promise<void>;
   onGoogleLogin: () => Promise<void>;
-  onOpenDemo: () => void;
+  onAppleLogin: () => Promise<void>;
 }
 
 export function AuthScreen({
-  demoMode,
+  configured,
   busy,
   message,
+  recoveryMode,
   onEmailLogin,
   onEmailSignup,
+  onPasswordResetRequest,
+  onPasswordUpdate,
   onGoogleLogin,
-  onOpenDemo,
+  onAppleLogin,
 }: AuthScreenProps) {
-  const [mode, setMode] = useState<"login" | "signup">("login");
+  const [mode, setMode] = useState<AuthMode>("login");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [error, setError] = useState("");
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
     try {
-      if (mode === "login") await onEmailLogin(email, password);
-      else await onEmailSignup(displayName, email, password);
+      if (recoveryMode) {
+        if (password.length < 8) {
+          throw new Error("新しいパスワードは8文字以上で入力してください。");
+        }
+        if (password !== passwordConfirmation) {
+          throw new Error("確認用パスワードが一致しません。");
+        }
+        await onPasswordUpdate(password);
+      } else if (mode === "forgot") {
+        await onPasswordResetRequest(email);
+      } else if (mode === "login") {
+        await onEmailLogin(email, password);
+      } else {
+        await onEmailSignup(displayName, email, password);
+      }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "ログインできませんでした。");
+      setError(caught instanceof Error ? caught.message : "認証処理に失敗しました。");
     }
   };
+
+  const heading = recoveryMode
+    ? "新しいパスワードを設定"
+    : mode === "signup"
+      ? "アカウントを作成"
+      : mode === "forgot"
+        ? "パスワードを再設定"
+        : "MapAlbumにログイン";
 
   return (
     <main className="auth-screen">
@@ -62,8 +101,8 @@ export function AuthScreen({
             あの日の場所が見える。
           </h1>
           <p>
-            家族や友だちと同じアルバムに投稿。写真、ことば、撮影場所を
-            かわいい丸いアイコンで日本地図に残せます。
+            家族や友だちと同じアルバムに投稿。ログインしたメンバーだけが、
+            写真、ことば、撮影場所を閲覧できます。
           </p>
         </div>
         <div className="auth-mini-map" aria-hidden="true">
@@ -77,29 +116,49 @@ export function AuthScreen({
       <section className="auth-panel">
         <div className="auth-card">
           <div className="auth-heading">
-            <p>おかえりなさい</p>
-            <h2>{mode === "login" ? "MapAlbumにログイン" : "アカウントを作成"}</h2>
+            <p>{recoveryMode ? "安全なパスワードへ更新" : "おかえりなさい"}</p>
+            <h2>{heading}</h2>
           </div>
 
-          <div className="auth-mode" role="tablist" aria-label="認証方法">
-            <button
-              type="button"
-              className={mode === "login" ? "is-active" : ""}
-              onClick={() => setMode("login")}
-            >
-              ログイン
-            </button>
-            <button
-              type="button"
-              className={mode === "signup" ? "is-active" : ""}
-              onClick={() => setMode("signup")}
-            >
-              新規登録
-            </button>
-          </div>
+          {!recoveryMode && mode !== "forgot" ? (
+            <div className="auth-mode" role="tablist" aria-label="認証方法">
+              <button
+                type="button"
+                className={mode === "login" ? "is-active" : ""}
+                onClick={() => {
+                  setMode("login");
+                  setError("");
+                }}
+              >
+                ログイン
+              </button>
+              <button
+                type="button"
+                className={mode === "signup" ? "is-active" : ""}
+                onClick={() => {
+                  setMode("signup");
+                  setError("");
+                }}
+              >
+                新規登録
+              </button>
+            </div>
+          ) : null}
+
+          {mode === "forgot" && !recoveryMode ? (
+            <p className="auth-intro">
+              登録したメールアドレスへ、パスワード再設定リンクを送信します。
+            </p>
+          ) : null}
+
+          {recoveryMode ? (
+            <p className="auth-intro">
+              8文字以上の新しいパスワードを入力してください。更新後は一度ログアウトします。
+            </p>
+          ) : null}
 
           <form className="auth-form" onSubmit={submit}>
-            {mode === "signup" ? (
+            {mode === "signup" && !recoveryMode ? (
               <label>
                 <span>表示名</span>
                 <div className="input-shell">
@@ -115,77 +174,153 @@ export function AuthScreen({
               </label>
             ) : null}
 
-            <label>
-              <span>メールアドレス</span>
-              <div className="input-shell">
-                <Mail size={18} />
-                <input
-                  type="email"
-                  value={email}
-                  onChange={(event) => setEmail(event.target.value)}
-                  placeholder="name@example.com"
-                  autoComplete="email"
-                  required
-                />
-              </div>
-            </label>
+            {!recoveryMode ? (
+              <label>
+                <span>メールアドレス</span>
+                <div className="input-shell">
+                  <Mail size={18} />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    placeholder="name@example.com"
+                    autoComplete="email"
+                    inputMode="email"
+                    required
+                  />
+                </div>
+              </label>
+            ) : null}
 
-            <label>
-              <span>パスワード</span>
-              <div className="input-shell">
-                <LockKeyhole size={18} />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  placeholder="6文字以上"
-                  autoComplete={mode === "signup" ? "new-password" : "current-password"}
-                  minLength={6}
-                  required
-                />
-              </div>
-            </label>
+            {mode !== "forgot" || recoveryMode ? (
+              <label>
+                <span>{recoveryMode ? "新しいパスワード" : "パスワード"}</span>
+                <div className="input-shell">
+                  <LockKeyhole size={18} />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    placeholder={recoveryMode ? "8文字以上" : "8文字以上"}
+                    autoComplete={
+                      recoveryMode || mode === "signup"
+                        ? "new-password"
+                        : "current-password"
+                    }
+                    minLength={8}
+                    required
+                  />
+                </div>
+              </label>
+            ) : null}
+
+            {recoveryMode ? (
+              <label>
+                <span>新しいパスワード（確認）</span>
+                <div className="input-shell">
+                  <KeyRound size={18} />
+                  <input
+                    type="password"
+                    value={passwordConfirmation}
+                    onChange={(event) => setPasswordConfirmation(event.target.value)}
+                    placeholder="もう一度入力"
+                    autoComplete="new-password"
+                    minLength={8}
+                    required
+                  />
+                </div>
+              </label>
+            ) : null}
+
+            {mode === "login" && !recoveryMode ? (
+              <button
+                className="forgot-password-button"
+                type="button"
+                onClick={() => {
+                  setMode("forgot");
+                  setError("");
+                }}
+              >
+                パスワードを忘れた場合
+              </button>
+            ) : null}
 
             {error || message ? (
-              <p className={error ? "form-message form-message--error" : "form-message"}>
+              <p
+                role={error ? "alert" : "status"}
+                className={error ? "form-message form-message--error" : "form-message"}
+              >
                 {error || message}
               </p>
             ) : null}
 
-            <button className="primary-button" type="submit" disabled={busy || demoMode}>
-              {busy ? "しばらくお待ちください…" : mode === "login" ? "ログイン" : "登録する"}
+            {!configured ? (
+              <p className="form-message form-message--error">
+                Supabaseが未設定です。管理者はREADMEの手順で接続情報を設定してください。
+              </p>
+            ) : null}
+
+            <button className="primary-button" type="submit" disabled={busy || !configured}>
+              {busy
+                ? "しばらくお待ちください…"
+                : recoveryMode
+                  ? "パスワードを更新"
+                  : mode === "forgot"
+                    ? "再設定メールを送信"
+                    : mode === "login"
+                      ? "ログイン"
+                      : "登録して確認メールを受け取る"}
               {!busy ? <ArrowRight size={18} /> : null}
             </button>
+
+            {mode === "forgot" && !recoveryMode ? (
+              <button
+                className="back-to-login"
+                type="button"
+                onClick={() => {
+                  setMode("login");
+                  setError("");
+                }}
+              >
+                <ArrowLeft size={16} />
+                ログインへ戻る
+              </button>
+            ) : null}
           </form>
 
-          <div className="auth-divider">
-            <span>または</span>
-          </div>
+          {!recoveryMode && mode !== "forgot" ? (
+            <>
+              <div className="auth-divider">
+                <span>または</span>
+              </div>
 
-          <button
-            className="secondary-button"
-            type="button"
-            disabled={busy || demoMode}
-            onClick={() => void onGoogleLogin()}
-          >
-            <Chrome size={19} />
-            Googleで続ける
-          </button>
-
-          {demoMode ? (
-            <div className="demo-entry">
-              <p>
-                Supabase設定前です。完成画面と操作感はデモデータで確認できます。
-              </p>
-              <button type="button" onClick={onOpenDemo}>
-                デモを開く
-                <ArrowRight size={16} />
-              </button>
-            </div>
+              <div className="social-auth-buttons">
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={busy || !configured}
+                  onClick={() => void onGoogleLogin()}
+                >
+                  <Chrome size={19} />
+                  Googleで続ける
+                </button>
+                <button
+                  className="secondary-button apple-auth-button"
+                  type="button"
+                  disabled={busy || !configured}
+                  onClick={() => void onAppleLogin()}
+                >
+                  <span className="apple-mark" aria-hidden="true">
+                    
+                  </span>
+                  Appleで続ける
+                </button>
+              </div>
+            </>
           ) : null}
         </div>
         <p className="auth-footnote">
-          続行すると、アルバム参加者に表示名と投稿写真が共有されます。
+          アルバムの内容は、ログイン済みかつ参加権限を持つメンバーだけが閲覧できます。
         </p>
       </section>
     </main>

@@ -1,4 +1,4 @@
-import { get, set } from "idb-keyval";
+import { del, get, keys, set } from "idb-keyval";
 import type {
   Album,
   AlbumMember,
@@ -16,6 +16,29 @@ type LoadResult<T> = {
 
 const albumCacheKey = (userID: string) => `mapalbum:albums:${userID}`;
 const photoCacheKey = (albumID: string) => `mapalbum:photos:${albumID}`;
+
+export async function clearPrivateOfflineData() {
+  try {
+    const storedKeys = await keys();
+    await Promise.all(
+      storedKeys
+        .filter(
+          (key): key is string =>
+            typeof key === "string" && key.startsWith("mapalbum:"),
+        )
+        .map((key) => del(key)),
+    );
+  } catch {
+    // ログアウト自体は、端末キャッシュ削除の失敗で止めない。
+  }
+
+  if ("caches" in window) {
+    await Promise.allSettled([
+      caches.delete("mapalbum-photo-cache"),
+      caches.delete("mapalbum-api-cache"),
+    ]);
+  }
+}
 
 function requireSupabase() {
   if (!supabase) throw new Error("Supabaseが設定されていません。");
@@ -106,7 +129,7 @@ export async function loadPhotos(
     if (paths.length > 0) {
       const { data: signedData, error: signedError } = await client.storage
         .from("album-photos")
-        .createSignedUrls(paths, 60 * 60 * 24 * 7);
+        .createSignedUrls(paths, 60 * 60);
       if (signedError) throw signedError;
       for (const signed of signedData ?? []) {
         if (signed.path && signed.signedUrl) {
@@ -179,7 +202,7 @@ export async function uploadPhoto(input: {
     .from("album-photos")
     .upload(storagePath, compressed, {
       contentType: "image/jpeg",
-      cacheControl: "31536000",
+      cacheControl: "3600",
       upsert: false,
     });
   if (uploadError) throw uploadError;

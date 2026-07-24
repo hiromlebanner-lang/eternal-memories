@@ -1,4 +1,4 @@
-import type { Session, User } from "@supabase/supabase-js";
+import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
 import {
   Images,
   Camera,
@@ -30,6 +30,7 @@ import { PhotoDetail } from "./components/PhotoDetail";
 import { PhotoEditor } from "./components/PhotoEditor";
 import { PhotoGrid } from "./components/PhotoGrid";
 import {
+  clearPrivateOfflineData,
   createAlbum,
   deletePhoto,
   joinAlbum,
@@ -38,7 +39,6 @@ import {
   updatePhoto,
   uploadPhoto,
 } from "./lib/data";
-import { DEMO_ALBUMS, DEMO_PHOTOS, DEMO_USER } from "./lib/demo";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import type {
   Album,
@@ -49,6 +49,14 @@ import type {
 } from "./types";
 
 type ViewMode = "map" | "photos";
+
+function authReturnURL(mode?: "recovery") {
+  const url = new URL(window.location.pathname, window.location.origin);
+  const inviteCode = new URLSearchParams(window.location.search).get("join");
+  if (inviteCode) url.searchParams.set("join", inviteCode);
+  if (mode === "recovery") url.searchParams.set("auth", "recovery");
+  return url.toString();
+}
 
 function userFromSupabase(user: User): AppUser {
   return {
@@ -80,21 +88,28 @@ function useDarkMode() {
 
 export default function App() {
   const [session, setSession] = useState<Session | null>(null);
-  const [demoActive, setDemoActive] = useState(false);
   const [authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
+  const [passwordRecovery, setPasswordRecovery] = useState(
+    () => new URLSearchParams(window.location.search).get("auth") === "recovery",
+  );
 
   useEffect(() => {
     if (!supabase) return;
-    void supabase.auth.getSession().then(({ data }) => {
-      setSession(data.session);
-      setAuthReady(true);
-    });
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      setSession(nextSession);
-      setAuthReady(true);
-    });
+    const client = supabase;
+    void client.auth
+      .getSession()
+      .then(({ data }) => setSession(data.session))
+      .finally(() => setAuthReady(true));
+    const { data: listener } = client.auth.onAuthStateChange(
+      (event: AuthChangeEvent, nextSession) => {
+        setSession(nextSession);
+        setAuthReady(true);
+        if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
+        if (event === "SIGNED_OUT") void clearPrivateOfflineData();
+      },
+    );
     return () => listener.subscription.unsubscribe();
   }, []);
 
@@ -122,26 +137,72 @@ export default function App() {
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { display_name: displayName.trim() } },
+        options: {
+          data: { display_name: displayName.trim() },
+          emailRedirectTo: authReturnURL(),
+        },
       });
       if (error) throw error;
       if (!data.session) {
-        setAuthMessage("確認メールを送信しました。メール内のリンクを開いてください。");
+        setAuthMessage(
+          "確認メールを送信しました。メール内のリンクを開いて登録を完了してください。",
+        );
       }
     } finally {
       setAuthBusy(false);
     }
   };
 
-  const googleLogin = async () => {
+  const socialLogin = async (provider: "google" | "apple") => {
     if (!supabase) return;
     setAuthBusy(true);
+    setAuthMessage("");
     try {
       const { error } = await supabase.auth.signInWithOAuth({
-        provider: "google",
-        options: { redirectTo: window.location.href },
+        provider,
+        options: { redirectTo: authReturnURL() },
       });
       if (error) throw error;
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const requestPasswordReset = async (email: string) => {
+    if (!supabase) return;
+    setAuthBusy(true);
+    setAuthMessage("");
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: authReturnURL("recovery"),
+      });
+      if (error) throw error;
+      setAuthMessage(
+        "パスワード再設定メールを送信しました。メールに記載されたリンクを開いてください。",
+      );
+    } finally {
+      setAuthBusy(false);
+    }
+  };
+
+  const updatePassword = async (password: string) => {
+    if (!supabase) return;
+    setAuthBusy(true);
+    setAuthMessage("");
+    try {
+      const { error } = await supabase.auth.updateUser({ password });
+      if (error) throw error;
+      setPasswordRecovery(false);
+      const url = new URL(window.location.href);
+      url.searchParams.delete("auth");
+      url.searchParams.delete("code");
+      url.hash = "";
+      window.history.replaceState({}, "", url);
+      await supabase.auth.signOut({ scope: "local" });
+      await clearPrivateOfflineData();
+      setAuthMessage(
+        "パスワードを更新しました。新しいパスワードでログインしてください。",
+      );
     } finally {
       setAuthBusy(false);
     }
@@ -158,22 +219,21 @@ export default function App() {
     );
   }
 
-  const user = demoActive
-    ? DEMO_USER
-    : session?.user
-      ? userFromSupabase(session.user)
-      : null;
+  const user = session?.user ? userFromSupabase(session.user) : null;
 
-  if (!user) {
+  if (!user || passwordRecovery) {
     return (
       <AuthScreen
-        demoMode={!isSupabaseConfigured}
+        configured={isSupabaseConfigured}
         busy={authBusy}
         message={authMessage}
+        recoveryMode={passwordRecovery}
         onEmailLogin={emailLogin}
         onEmailSignup={emailSignup}
-        onGoogleLogin={googleLogin}
-        onOpenDemo={() => setDemoActive(true)}
+        onPasswordResetRequest={requestPasswordReset}
+        onPasswordUpdate={updatePassword}
+        onGoogleLogin={() => socialLogin("google")}
+        onAppleLogin={() => socialLogin("apple")}
       />
     );
   }
@@ -181,10 +241,9 @@ export default function App() {
   return (
     <Dashboard
       user={user}
-      demoMode={demoActive}
       onSignOut={async () => {
-        if (demoActive) setDemoActive(false);
-        else await supabase?.auth.signOut();
+        await supabase?.auth.signOut();
+        await clearPrivateOfflineData();
       }}
     />
   );
@@ -192,26 +251,18 @@ export default function App() {
 
 function Dashboard({
   user,
-  demoMode,
   onSignOut,
 }: {
   user: AppUser;
-  demoMode: boolean;
   onSignOut: () => Promise<void>;
 }) {
   const [dark, setDark] = useDarkMode();
-  const [albums, setAlbums] = useState<Album[]>(demoMode ? DEMO_ALBUMS : []);
-  const [selectedAlbumID, setSelectedAlbumID] = useState<string>(
-    demoMode ? DEMO_ALBUMS[0].id : "",
-  );
-  const [photos, setPhotos] = useState<AlbumPhoto[]>(
-    demoMode
-      ? DEMO_PHOTOS.filter((photo) => photo.album_id === DEMO_ALBUMS[0].id)
-      : [],
-  );
+  const [albums, setAlbums] = useState<Album[]>([]);
+  const [selectedAlbumID, setSelectedAlbumID] = useState("");
+  const [photos, setPhotos] = useState<AlbumPhoto[]>([]);
   const [viewMode, setViewMode] = useState<ViewMode>("map");
   const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(!demoMode);
+  const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(!navigator.onLine);
   const [usingCache, setUsingCache] = useState(false);
   const [toast, setToast] = useState("");
@@ -232,7 +283,6 @@ function Dashboard({
     : "";
 
   const refreshAlbums = useCallback(async () => {
-    if (demoMode) return;
     try {
       const result = await loadAlbums(user.id);
       setAlbums(result.data);
@@ -245,17 +295,11 @@ function Dashboard({
     } catch (error) {
       setToast(error instanceof Error ? error.message : "アルバムを読み込めませんでした。");
     }
-  }, [demoMode, user.id]);
+  }, [user.id]);
 
   const refreshPhotos = useCallback(async () => {
     if (!selectedAlbumID) {
       setPhotos([]);
-      setLoading(false);
-      return;
-    }
-
-    if (demoMode) {
-      setPhotos(DEMO_PHOTOS.filter((photo) => photo.album_id === selectedAlbumID));
       setLoading(false);
       return;
     }
@@ -270,7 +314,7 @@ function Dashboard({
     } finally {
       setLoading(false);
     }
-  }, [demoMode, selectedAlbumID]);
+  }, [selectedAlbumID]);
 
   useEffect(() => {
     void refreshAlbums();
@@ -287,19 +331,8 @@ function Dashboard({
 
     const acceptInvite = async () => {
       try {
-        let albumID = "";
-        if (demoMode) {
-          albumID =
-            DEMO_ALBUMS.find(
-              (album) =>
-                album.invite_code.replaceAll("-", "") ===
-                inviteCode.replaceAll("-", ""),
-            )?.id ?? "";
-          if (!albumID) throw new Error("招待コードが見つかりません。");
-        } else {
-          albumID = await joinAlbum(inviteCode);
-          await refreshAlbums();
-        }
+        const albumID = await joinAlbum(inviteCode);
+        await refreshAlbums();
         setSelectedAlbumID(albumID);
         setToast("招待されたアルバムに参加しました");
         const url = new URL(window.location.href);
@@ -310,7 +343,7 @@ function Dashboard({
       }
     };
     void acceptInvite();
-  }, [demoMode, refreshAlbums]);
+  }, [refreshAlbums]);
 
   useEffect(() => {
     const online = () => {
@@ -328,7 +361,7 @@ function Dashboard({
   }, [refreshAlbums, refreshPhotos]);
 
   useEffect(() => {
-    if (!supabase || demoMode || !selectedAlbumID) return;
+    if (!supabase || !selectedAlbumID) return;
     const client = supabase;
     const channel = client
       .channel(`photos:${selectedAlbumID}`)
@@ -346,7 +379,7 @@ function Dashboard({
     return () => {
       void client.removeChannel(channel);
     };
-  }, [demoMode, refreshPhotos, selectedAlbumID]);
+  }, [refreshPhotos, selectedAlbumID]);
 
   useEffect(() => {
     if (!toast) return;
@@ -391,119 +424,55 @@ function Dashboard({
     if (!selectedAlbum) throw new Error("アルバムが選択されていません。");
 
     if (editingPhoto) {
-      if (demoMode) {
-        setPhotos((current) =>
-          current.map((photo) =>
-            photo.id === editingPhoto.id
-              ? {
-                  ...photo,
-                  caption: values.caption,
-                  category: values.category,
-                  captured_at: values.capturedAt,
-                  latitude: values.latitude,
-                  longitude: values.longitude,
-                }
-              : photo,
-          ),
-        );
-      } else {
-        await updatePhoto(editingPhoto.id, {
-          caption: values.caption,
-          category: values.category,
-          captured_at: values.capturedAt,
-          latitude: values.latitude,
-          longitude: values.longitude,
-        });
-        await refreshPhotos();
-      }
+      await updatePhoto(editingPhoto.id, {
+        caption: values.caption,
+        category: values.category,
+        captured_at: values.capturedAt,
+        latitude: values.latitude,
+        longitude: values.longitude,
+      });
+      await refreshPhotos();
       setToast("写真を更新しました");
       setEditingPhoto(undefined);
       return;
     }
 
     if (!values.file) throw new Error("写真を選択してください。");
-    if (demoMode) {
-      const nextPhoto: AlbumPhoto = {
-        id: crypto.randomUUID(),
-        album_id: selectedAlbum.id,
-        author_id: user.id,
-        author_name: user.displayName,
-        storage_path: "",
-        image_url: URL.createObjectURL(values.file),
-        caption: values.caption,
-        category: values.category,
-        captured_at: values.capturedAt,
-        created_at: new Date().toISOString(),
-        latitude: values.latitude,
-        longitude: values.longitude,
-      };
-      setPhotos((current) => [nextPhoto, ...current]);
-    } else {
-      await uploadPhoto({
-        albumID: selectedAlbum.id,
-        authorID: user.id,
-        authorName: user.displayName,
-        file: values.file,
-        caption: values.caption,
-        category: values.category,
-        capturedAt: values.capturedAt,
-        latitude: values.latitude,
-        longitude: values.longitude,
-      });
-      await refreshPhotos();
-      await refreshAlbums();
-    }
+    await uploadPhoto({
+      albumID: selectedAlbum.id,
+      authorID: user.id,
+      authorName: user.displayName,
+      file: values.file,
+      caption: values.caption,
+      category: values.category,
+      capturedAt: values.capturedAt,
+      latitude: values.latitude,
+      longitude: values.longitude,
+    });
+    await refreshPhotos();
+    await refreshAlbums();
     setToast("写真をアルバムに追加しました");
   };
 
   const removePhoto = async (photo: AlbumPhoto) => {
-    if (demoMode) {
-      setPhotos((current) => current.filter((candidate) => candidate.id !== photo.id));
-    } else {
-      await deletePhoto(photo);
-      await refreshPhotos();
-      await refreshAlbums();
-    }
+    await deletePhoto(photo);
+    await refreshPhotos();
+    await refreshAlbums();
     setDetailPhotos((current) => current.filter((candidate) => candidate.id !== photo.id));
     setToast("写真を削除しました");
   };
 
   const addAlbum = async (name: string, description: string) => {
-    if (demoMode) {
-      const next: Album = {
-        id: crypto.randomUUID(),
-        name,
-        description,
-        invite_code: Math.random().toString(36).slice(2, 10).toUpperCase(),
-        created_by: user.id,
-        created_at: new Date().toISOString(),
-        role: "admin",
-        photo_count: 0,
-        member_count: 1,
-      };
-      setAlbums((current) => [next, ...current]);
-      setSelectedAlbumID(next.id);
-      setPhotos([]);
-    } else {
-      const id = await createAlbum(name, description);
-      await refreshAlbums();
-      setSelectedAlbumID(id);
-    }
+    const id = await createAlbum(name, description);
+    await refreshAlbums();
+    setSelectedAlbumID(id);
     setToast("アルバムを作成しました");
   };
 
   const enterAlbum = async (code: string) => {
-    if (demoMode) {
-      const found = albums.find(
-        (album) => album.invite_code.replaceAll("-", "") === code.replaceAll("-", ""),
-      );
-      if (!found) throw new Error("デモ内に一致する招待コードがありません。");
-      setSelectedAlbumID(found.id);
-    } else {
-      const id = await joinAlbum(code);
-      await refreshAlbums();
-      setSelectedAlbumID(id);
-    }
+    const id = await joinAlbum(code);
+    await refreshAlbums();
+    setSelectedAlbumID(id);
     setToast("共有アルバムに参加しました");
   };
 
@@ -570,13 +539,6 @@ function Dashboard({
             : "一部のデータを端末キャッシュから表示しています。"}
         </div>
       )}
-
-      {demoMode ? (
-        <div className="demo-banner">
-          <span>デモモード</span>
-          Supabaseを設定すると、端末間共有が有効になります。
-        </div>
-      ) : null}
 
       <main className="app-main">
         {selectedAlbum ? (
@@ -785,7 +747,6 @@ function Dashboard({
         <MemberManager
           album={selectedAlbum}
           currentUser={user}
-          demoMode={demoMode}
           onClose={() => setShowsMembers(false)}
         />
       ) : null}
