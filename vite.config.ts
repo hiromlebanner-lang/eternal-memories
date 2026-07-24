@@ -1,0 +1,132 @@
+import react from "@vitejs/plugin-react";
+import { mkdir, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
+import { defineConfig, type Plugin } from "vite";
+import { VitePWA } from "vite-plugin-pwa";
+import { sites } from "./build/sites-vite-plugin";
+
+function staticWorker(): Plugin {
+  return {
+    name: "mapalbum-static-worker",
+    apply: "build",
+    async closeBundle() {
+      const directory = resolve("dist", "server");
+      await mkdir(directory, { recursive: true });
+      await writeFile(
+        resolve(directory, "index.js"),
+        `export default {
+  async fetch(request, env) {
+    let response = await env.ASSETS.fetch(request);
+    if (response.status === 404 && request.method === "GET") {
+      const acceptsHTML = request.headers.get("accept")?.includes("text/html");
+      if (acceptsHTML) {
+        response = await env.ASSETS.fetch(new Request(new URL("/index.html", request.url), request));
+      }
+    }
+    if (response.headers.get("content-type")?.includes("text/html")) {
+      const headers = new Headers(response.headers);
+      headers.delete("content-length");
+      const imageURL = new URL("/og.png", request.url).href;
+      return new Response((await response.text()).replaceAll("__MAPALBUM_OG_IMAGE__", imageURL), {
+        status: response.status,
+        statusText: response.statusText,
+        headers,
+      });
+    }
+    return response;
+  }
+};
+`,
+      );
+    },
+  };
+}
+
+export default defineConfig({
+  plugins: [
+    react(),
+    VitePWA({
+      registerType: "autoUpdate",
+      includeAssets: ["icons/apple-touch-icon.png"],
+      manifest: {
+        name: "MapAlbum — 地図写真アルバム",
+        short_name: "MapAlbum",
+        description: "みんなの写真を日本地図に残す共有アルバム",
+        lang: "ja",
+        start_url: "/",
+        display: "standalone",
+        background_color: "#f6f3ed",
+        theme_color: "#ff6b5f",
+        orientation: "any",
+        icons: [
+          {
+            src: "/icons/icon-192.png",
+            sizes: "192x192",
+            type: "image/png",
+          },
+          {
+            src: "/icons/icon-512.png",
+            sizes: "512x512",
+            type: "image/png",
+          },
+          {
+            src: "/icons/maskable-512.png",
+            sizes: "512x512",
+            type: "image/png",
+            purpose: "maskable",
+          },
+        ],
+      },
+      workbox: {
+        cleanupOutdatedCaches: true,
+        clientsClaim: true,
+        skipWaiting: true,
+        navigateFallback: "/index.html",
+        globPatterns: ["**/*.{js,css,html,png,jpg,jpeg,webp,woff2}"],
+        runtimeCaching: [
+          {
+            urlPattern: /^https:\/\/[a-c]\.tile\.openstreetmap\.org\/.*/i,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "mapalbum-map-tiles",
+              expiration: {
+                maxEntries: 700,
+                maxAgeSeconds: 60 * 60 * 24 * 30,
+              },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            urlPattern: /^https:\/\/.*\.supabase\.co\/storage\/v1\/object\/.*/i,
+            handler: "CacheFirst",
+            options: {
+              cacheName: "mapalbum-photo-cache",
+              expiration: {
+                maxEntries: 250,
+                maxAgeSeconds: 60 * 60 * 24 * 14,
+              },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            urlPattern: /^https:\/\/.*\.supabase\.co\/rest\/v1\/.*/i,
+            handler: "NetworkFirst",
+            options: {
+              cacheName: "mapalbum-api-cache",
+              networkTimeoutSeconds: 5,
+              expiration: {
+                maxEntries: 100,
+                maxAgeSeconds: 60 * 60 * 24,
+              },
+            },
+          },
+        ],
+      },
+      devOptions: {
+        enabled: true,
+      },
+    }),
+    sites(),
+    staticWorker(),
+  ],
+});
