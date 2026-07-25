@@ -124,6 +124,23 @@ export default function App() {
   useEffect(() => {
     if (!supabase) return;
     const client = supabase;
+    const callbackURL = new URL(window.location.href);
+    const oauthError = callbackURL.searchParams.get("error");
+    const oauthDescription = callbackURL.searchParams.get("error_description");
+    if (oauthError) {
+      console.error("OAuth callback failed:", oauthError, oauthDescription);
+      setAuthMessage(
+        oauthError === "access_denied"
+          ? "ログインがキャンセルされました"
+          : oauthDescription?.toLowerCase().includes("already")
+            ? "このメールアドレスは別のログイン方法で登録されています"
+            : "認証情報を確認できませんでした",
+      );
+      callbackURL.searchParams.delete("error");
+      callbackURL.searchParams.delete("error_code");
+      callbackURL.searchParams.delete("error_description");
+      window.history.replaceState({}, "", callbackURL);
+    }
     void client.auth
       .getSession()
       .then(({ data }) => setSession(data.session))
@@ -189,6 +206,13 @@ export default function App() {
         options: { redirectTo: authReturnURL() },
       });
       if (error) throw error;
+    } catch (error) {
+      console.error(`${provider} OAuth start failed:`, error);
+      setAuthMessage(
+        provider === "google"
+          ? "Googleログインを開始できませんでした"
+          : "Appleログインを開始できませんでした",
+      );
     } finally {
       setAuthBusy(false);
     }
