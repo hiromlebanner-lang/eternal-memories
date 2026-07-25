@@ -78,31 +78,31 @@ export function AuthScreen({
       ? "アカウントを作成"
       : mode === "forgot"
         ? "パスワードを再設定"
-        : "MapAlbumにログイン";
+        : "Eternal memoriesにログイン";
 
   return (
     <main className="auth-screen">
-      <section className="auth-hero" aria-label="MapAlbumについて">
+      <section className="auth-hero" aria-label="Eternal memoriesについて">
         <div className="brand-lockup">
           <span className="brand-mark">
             <Map size={28} strokeWidth={2.4} />
             <span>●</span>
           </span>
-          <span>MapAlbum</span>
+          <span>Eternal memories</span>
         </div>
         <div className="auth-hero-copy">
           <span className="eyebrow">
             <Sparkles size={15} />
-            みんなの旅を、ひとつの地図へ
+            みんなの旅を、みんなの思い出に
           </span>
           <h1>
-            写真をひらくと、
-            <br />
-            あの日の場所が見える。
+            <span>思い出は、</span>
+            <span className="auth-title-detail">写真をひらくたびに色づいていく。</span>
           </h1>
           <p>
-            家族や友だちと同じアルバムに投稿。ログインしたメンバーだけが、
-            写真、ことば、撮影場所を閲覧できます。
+            家族や友だちと、旅の景色や笑顔をひとつのアルバムに。
+            <br />
+            あの日の写真も、その時の想いも、いつまでも色あせない思い出として残せます。
           </p>
         </div>
         <div className="auth-mini-map" aria-hidden="true">

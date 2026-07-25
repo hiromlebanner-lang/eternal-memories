@@ -177,15 +177,17 @@ img {
 .auth-screen {
   min-height: 100dvh;
   display: grid;
+  overflow-x: clip;
   background: var(--background);
 }
 
 .auth-hero {
   position: relative;
+  min-width: 0;
   min-height: 340px;
   overflow: hidden;
   padding:
-    max(24px, env(safe-area-inset-top)) 24px 34px;
+    max(24px, env(safe-area-inset-top)) 20px 34px;
   color: white;
   background:
     radial-gradient(circle at 15% 18%, rgb(255 255 255 / 22%) 0, transparent 24%),
@@ -255,8 +257,21 @@ img {
 .auth-hero-copy h1 {
   margin: 14px 0 12px;
   font-size: clamp(34px, 7vw, 58px);
+  font-weight: 800;
   line-height: 1.06;
   letter-spacing: -0.055em;
+}
+
+.auth-hero-copy h1 > span {
+  display: block;
+}
+
+.auth-title-detail {
+  margin-top: 5px;
+  font-size: clamp(16.5px, 5.2vw, 34px);
+  line-height: 1.28;
+  letter-spacing: -0.07em;
+  white-space: nowrap;
 }
 
 .auth-hero-copy p {
@@ -314,6 +329,7 @@ img {
 
 .auth-panel {
   display: grid;
+  min-width: 0;
   align-content: center;
   padding: 24px 18px max(30px, env(safe-area-inset-bottom));
 }
@@ -327,6 +343,12 @@ img {
   background: var(--surface-raised);
   box-shadow: var(--shadow);
   backdrop-filter: blur(24px);
+}
+
+@media (max-width: 699px) {
+  .auth-mini-map {
+    display: none;
+  }
 }
 
 .auth-heading p {
