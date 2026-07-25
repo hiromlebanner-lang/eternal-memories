@@ -60,6 +60,8 @@ beforeEach(() => {
   );
   auth.signInWithPassword.mockResolvedValue({ error: null });
   auth.signUp.mockResolvedValue({ data: { session: null }, error: null });
+  auth.signInWithOAuth.mockResolvedValue({ error: null });
+  auth.resetPasswordForEmail.mockResolvedValue({ error: null });
   auth.signOut.mockResolvedValue({ error: null });
   data.loadAlbums.mockResolvedValue({ data: [], fromCache: false });
   data.loadMyPendingJoinRequests.mockResolvedValue([]);
@@ -105,6 +107,42 @@ describe("Supabase Auth連携", () => {
       email: "hana@example.com",
       password: "password1",
     });
+  });
+
+  it("Google／Appleログインへ現在のURLを戻り先として渡す", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("MapAlbumにログイン");
+
+    await user.click(screen.getByRole("button", { name: "Googleで続ける" }));
+    expect(auth.signInWithOAuth).toHaveBeenLastCalledWith({
+      provider: "google",
+      options: { redirectTo: expect.stringContaining(window.location.origin) },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Appleで続ける" }));
+    expect(auth.signInWithOAuth).toHaveBeenLastCalledWith({
+      provider: "apple",
+      options: { redirectTo: expect.stringContaining(window.location.origin) },
+    });
+  });
+
+  it("パスワード再設定にrecovery付きの戻り先を設定する", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("MapAlbumにログイン");
+
+    await user.click(screen.getByRole("button", { name: "パスワードを忘れた場合" }));
+    await user.type(screen.getByLabelText("メールアドレス"), "hana@example.com");
+    await user.click(screen.getByRole("button", { name: /再設定メールを送信/ }));
+
+    expect(auth.resetPasswordForEmail).toHaveBeenCalledWith(
+      "hana@example.com",
+      {
+        redirectTo: expect.stringMatching(/[?&]auth=recovery(?:&|$)/),
+      },
+    );
+    expect(await screen.findByRole("status")).toHaveTextContent("再設定メール");
   });
 
   it("04 セッション確立後にダッシュボードを表示しログアウトする", async () => {

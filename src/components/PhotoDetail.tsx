@@ -8,7 +8,7 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type { AlbumPhoto } from "../types";
 import { CATEGORY_META } from "../types";
 import { Modal } from "./Modal";
@@ -38,11 +38,8 @@ export function PhotoDetail({
   });
   const [deleting, setDeleting] = useState(false);
 
-  useEffect(() => {
-    if (index >= photos.length) setIndex(Math.max(0, photos.length - 1));
-  }, [index, photos.length]);
-
-  const photo = photos[index];
+  const resolvedIndex = Math.min(index, Math.max(0, photos.length - 1));
+  const photo = photos[resolvedIndex];
   if (!photo) return null;
   const meta = CATEGORY_META[photo.category];
 
@@ -71,8 +68,8 @@ export function PhotoDetail({
               <button
                 type="button"
                 className="photo-detail__nav photo-detail__nav--left"
-                disabled={index === 0}
-                onClick={() => setIndex((current) => Math.max(0, current - 1))}
+                disabled={resolvedIndex === 0}
+                onClick={() => setIndex(Math.max(0, resolvedIndex - 1))}
                 aria-label="前の写真"
               >
                 <ChevronLeft />
@@ -80,9 +77,9 @@ export function PhotoDetail({
               <button
                 type="button"
                 className="photo-detail__nav photo-detail__nav--right"
-                disabled={index === photos.length - 1}
+                disabled={resolvedIndex === photos.length - 1}
                 onClick={() =>
-                  setIndex((current) => Math.min(photos.length - 1, current + 1))
+                  setIndex(Math.min(photos.length - 1, resolvedIndex + 1))
                 }
                 aria-label="次の写真"
               >

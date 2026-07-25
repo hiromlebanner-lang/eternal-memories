@@ -43,6 +43,36 @@ function staticWorker(): Plugin {
 }
 
 export default defineConfig({
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: "map-vendor",
+              test: /node_modules[\\/](?:\.pnpm[\\/])?(?:leaflet|react-leaflet)/,
+              priority: 30,
+            },
+            {
+              name: "supabase-vendor",
+              test: /node_modules[\\/](?:\.pnpm[\\/])?@supabase/,
+              priority: 25,
+            },
+            {
+              name: "react-vendor",
+              test: /node_modules[\\/](?:\.pnpm[\\/])?(?:react|react-dom|scheduler)/,
+              priority: 20,
+            },
+            {
+              name: "media-vendor",
+              test: /node_modules[\\/](?:\.pnpm[\\/])?(?:exifr|qrcode)/,
+              priority: 15,
+            },
+          ],
+        },
+      },
+    },
+  },
   plugins: [
     react(),
     VitePWA({

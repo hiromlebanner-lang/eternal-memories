@@ -1021,18 +1021,27 @@ PWAとして使う段階ではMacやXcodeは不要です。App Storeへの最終
 
 ```text
 pnpm test
-Test Files  9 passed (9)
-Tests       28 passed (28)
+Test Files  11 passed (11)
+Tests       35 passed (35)
 
 pnpm typecheck
 TypeScript errors: 0
 
+pnpm lint
+ESLint errors: 0
+ESLint warnings: 0
+
 pnpm build
 Build: success
+Build warnings: 0
 PWA service worker: generated
+
+Production Preview
+Console errors: 0
+Console warnings: 0
 ```
 
-ローカルProduction Previewでは、ログイン画面、新規登録画面、Supabase未設定時の警告と認証ボタン無効化を実ブラウザーで確認しました。未ログイン状態ではアルバム、写真、地図、設定画面はDOM上にも表示されません。
+ローカルProduction Previewでは、ログイン、新規登録、パスワード再設定の各画面、Supabase未設定時の警告と認証ボタン無効化を実ブラウザーで確認しました。未ログイン状態ではアルバム、写真、地図、設定画面はDOM上にも表示されません。Google／Apple OAuth、写真のStorage保存とDB登録、写真一覧、共有URL／QR、ログアウト時のPrivate Cache削除も自動テストで確認しています。
 
 ### 項目別結果
 
@@ -1055,6 +1064,11 @@ PWA service worker: generated
 
 ### 今回修正した不具合
 
+- Viteの単一JavaScriptファイルが大きく、Production Buildにサイズ警告が出る問題
+- React／TypeScriptプロジェクトにNext.js用ESLint設定が残り、Lintを実行できない問題
+- 写真一覧、Google／Apple OAuth、Storage失敗時ロールバックの回帰テスト不足
+- 写真削除後に詳細画面の選択位置が範囲外になる可能性
+- 招待メール件名に制御文字を含められる問題
 - 写真を選び直した際に、前の写真のEXIF位置・撮影日時が残る問題
 - 先に選んだ写真の非同期EXIF結果が、後から選んだ写真を上書きする競合
 - 60m以内の写真が鎖状に連結され、離れた地点まで1グループになる問題

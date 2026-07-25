@@ -31,7 +31,12 @@ const escapeHTML = (value: string) =>
   );
 
 const cleanHeaderText = (value: string) =>
-  value.replace(/[\u0000-\u001f\u007f]+/g, " ").trim();
+  Array.from(value, (character) => {
+    const code = character.charCodeAt(0);
+    return code <= 0x1f || code === 0x7f ? " " : character;
+  })
+    .join("")
+    .trim();
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

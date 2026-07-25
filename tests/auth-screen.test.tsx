@@ -56,6 +56,26 @@ describe("認証画面", () => {
     );
   });
 
+  it("Googleログインを開始する", async () => {
+    const user = userEvent.setup();
+    const props = authProps();
+    render(<AuthScreen {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Googleで続ける" }));
+
+    expect(props.onGoogleLogin).toHaveBeenCalledOnce();
+  });
+
+  it("Appleログインを開始する", async () => {
+    const user = userEvent.setup();
+    const props = authProps();
+    render(<AuthScreen {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "Appleで続ける" }));
+
+    expect(props.onAppleLogin).toHaveBeenCalledOnce();
+  });
+
   it("05 パスワード再設定メールを要求する", async () => {
     const user = userEvent.setup();
     const props = authProps();

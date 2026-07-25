@@ -9,14 +9,12 @@ import { photo } from "./fixtures";
 describe("位置情報と同一地点", () => {
   it("08 GPS座標を取得し、高精度オプションを使う", async () => {
     const getCurrentPositionMock = vi.fn(
-      (
-        success: PositionCallback,
-        _error?: PositionErrorCallback | null,
-        _options?: PositionOptions,
-      ) =>
+      (...args: Parameters<Geolocation["getCurrentPosition"]>) => {
+        const [success] = args;
         success({
           coords: { latitude: 35.68, longitude: 139.76 },
-        } as GeolocationPosition),
+        } as GeolocationPosition);
+      },
     );
     Object.defineProperty(navigator, "geolocation", {
       configurable: true,

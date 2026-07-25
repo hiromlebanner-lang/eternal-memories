@@ -32,7 +32,7 @@ export async function compressPhoto(file: File): Promise<Blob> {
   let source: CanvasImageSource;
   let width: number;
   let height: number;
-  let cleanup = () => {};
+  let cleanup: () => void;
 
   try {
     if (typeof createImageBitmap !== "function") throw new Error("unsupported");
