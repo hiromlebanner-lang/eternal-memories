@@ -6,6 +6,13 @@ const state = vi.hoisted(() => ({
   authCallback: undefined as
     | ((event: string, session: Record<string, unknown> | null) => void)
     | undefined,
+  realtimeHandlers: [] as Array<{
+    filter: { event?: string; table?: string };
+    callback: (payload: {
+      new: Record<string, unknown>;
+      old?: Record<string, unknown>;
+    }) => void;
+  }>,
 }));
 const auth = vi.hoisted(() => ({
   getSession: vi.fn(),
@@ -23,6 +30,7 @@ const data = vi.hoisted(() => ({
   deletePhoto: vi.fn(),
   loadAlbumInviteCode: vi.fn(),
   loadAlbums: vi.fn(),
+  loadManagedJoinRequests: vi.fn(),
   loadMyPendingJoinRequests: vi.fn(),
   loadPhotos: vi.fn(),
   requestAlbumMembership: vi.fn(),
@@ -35,7 +43,15 @@ vi.mock("../src/lib/supabase", () => ({
   supabase: {
     auth,
     channel: vi.fn(() => ({
-      on() {
+      on(
+        _type: string,
+        filter: { event?: string; table?: string },
+        callback: (payload: {
+          new: Record<string, unknown>;
+          old?: Record<string, unknown>;
+        }) => void,
+      ) {
+        state.realtimeHandlers.push({ filter, callback });
         return this;
       },
       subscribe() {
@@ -51,6 +67,8 @@ import App from "../src/App";
 
 beforeEach(() => {
   state.authCallback = undefined;
+  state.realtimeHandlers.length = 0;
+  localStorage.clear();
   auth.getSession.mockResolvedValue({ data: { session: null } });
   auth.onAuthStateChange.mockImplementation(
     (callback: typeof state.authCallback) => {
@@ -64,6 +82,7 @@ beforeEach(() => {
   auth.resetPasswordForEmail.mockResolvedValue({ error: null });
   auth.signOut.mockResolvedValue({ error: null });
   data.loadAlbums.mockResolvedValue({ data: [], fromCache: false });
+  data.loadManagedJoinRequests.mockResolvedValue([]);
   data.loadMyPendingJoinRequests.mockResolvedValue([]);
   data.loadPhotos.mockResolvedValue({ data: [], fromCache: false });
 });
@@ -163,5 +182,98 @@ describe("Supabase Auth連携", () => {
     await user.click(screen.getByRole("button", { name: /ログアウト/ }));
     await waitFor(() => expect(auth.signOut).toHaveBeenCalled());
     expect(data.clearPrivateOfflineData).toHaveBeenCalled();
+  });
+
+  it("管理者が参加申請INSERTをRealtime受信すると一度だけ通知し件数を表示する", async () => {
+    const user = userEvent.setup();
+    const ownerAlbum = {
+      id: "album-1",
+      name: "思い出",
+      description: "",
+      invite_code: "",
+      created_by: "user-1",
+      owner_id: "user-1",
+      created_at: "2026-07-25T00:00:00.000Z",
+      role: "owner",
+      members_can_invite: false,
+      photo_count: 0,
+      member_count: 1,
+    };
+    const request = {
+      id: "request-1",
+      album_id: "album-1",
+      album_name: "思い出",
+      user_id: "user-2",
+      requested_role: "member",
+      status: "pending",
+      created_at: "2026-07-25T01:00:00.000Z",
+      display_name: "あおい",
+      email: "aoi@example.com",
+    };
+    data.loadAlbums.mockResolvedValue({
+      data: [ownerAlbum],
+      fromCache: false,
+    });
+    let managerRequests: typeof request[] = [];
+    data.loadManagedJoinRequests.mockImplementation(async () => managerRequests);
+
+    render(<App />);
+    await screen.findByText("MapAlbumにログイン");
+    await act(async () => {
+      state.authCallback?.("SIGNED_IN", {
+        user: {
+          id: "user-1",
+          email: "owner@example.com",
+          user_metadata: { display_name: "オーナー" },
+        },
+      });
+    });
+    await screen.findByRole("heading", { name: "思い出", level: 1 });
+    await waitFor(() =>
+      expect(
+        state.realtimeHandlers.some(
+          ({ filter }) =>
+            filter.table === "album_join_requests" &&
+            filter.event === "INSERT",
+        ),
+      ).toBe(true),
+    );
+
+    const handler = state.realtimeHandlers.find(
+      ({ filter }) =>
+        filter.table === "album_join_requests" &&
+        filter.event === "INSERT",
+    );
+    managerRequests = [request];
+    await act(async () => {
+      handler?.callback({
+        new: {
+          id: "request-1",
+          album_id: "album-1",
+          status: "pending",
+        },
+      });
+    });
+
+    expect(
+      await screen.findByText(
+        "あおいさんから「思い出」への参加申請が届きました",
+      ),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "共有・参加申請 1件" }),
+    ).toBeInTheDocument();
+
+    await user.click(
+      screen.getByRole("button", { name: "あとで" }),
+    );
+    await act(async () => {
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    expect(
+      screen.queryByText(
+        "あおいさんから「思い出」への参加申請が届きました",
+      ),
+    ).not.toBeInTheDocument();
   });
 });

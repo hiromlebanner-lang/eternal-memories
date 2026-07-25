@@ -1261,7 +1261,7 @@ grant select on table public.album_invitations to authenticated;
 grant select on table public.album_join_requests to authenticated;
 grant select on table public.nearby_invitations to authenticated;
 
--- MapAlbumの7テーブルに旧版の広いポリシーを残さず、以下で再構築します。
+-- MapAlbumの既存テーブルに旧版の広いポリシーを残さず、以下で再構築します。
 do $$
 declare
   old_policy record;
@@ -1572,3 +1572,615 @@ begin
   ) then alter publication supabase_realtime add table public.nearby_invitations; end if;
 end
 $$;
+
+-- ---------------------------------------------------------------------------
+-- 参加通知・アルバム別招待設定（2026-07-25）
+-- この節も再実行可能です。既存アルバムはcreated_byをowner_idへ移行します。
+-- ---------------------------------------------------------------------------
+
+alter table public.albums
+  add column if not exists owner_id uuid references public.profiles(id);
+alter table public.albums
+  add column if not exists members_can_invite boolean not null default false;
+alter table public.albums
+  add column if not exists invite_code_enabled boolean not null default true;
+alter table public.albums
+  add column if not exists invite_code_expires_at timestamptz
+    not null default (now() + interval '30 days');
+
+update public.albums
+set owner_id = created_by
+where owner_id is null;
+
+alter table public.albums
+  alter column owner_id set default auth.uid();
+alter table public.albums
+  alter column owner_id set not null;
+
+create table if not exists public.push_subscriptions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references public.profiles(id) on delete cascade,
+  endpoint text not null unique,
+  p256dh text not null,
+  auth_key text not null,
+  user_agent text not null default '',
+  enabled boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+create index if not exists push_subscriptions_user_enabled_idx
+  on public.push_subscriptions(user_id, enabled);
+
+insert into public.album_members (album_id, user_id, role)
+select id, owner_id, 'owner'
+from public.albums
+on conflict (album_id, user_id) do update set role = 'owner';
+
+create or replace function public.protect_album_identity()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_op = 'INSERT' then
+    if auth.uid() is null then
+      raise exception 'ログインが必要です';
+    end if;
+    new.created_by := auth.uid();
+    new.owner_id := auth.uid();
+    return new;
+  end if;
+
+  if new.created_by is distinct from old.created_by
+    or new.owner_id is distinct from old.owner_id
+    or new.created_at is distinct from old.created_at then
+    raise exception 'アルバムの作成者は変更できません';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists albums_protect_identity on public.albums;
+create trigger albums_protect_identity
+before insert or update on public.albums
+for each row execute function public.protect_album_identity();
+
+create or replace function public.add_album_creator_as_owner()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  insert into public.album_members (album_id, user_id, role)
+  values (new.id, new.owner_id, 'owner')
+  on conflict (album_id, user_id) do update set role = 'owner';
+  return new;
+end;
+$$;
+
+create or replace function public.protect_album_owner()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  album_owner uuid;
+begin
+  if tg_op = 'UPDATE'
+    and old.role = 'owner'
+    and (
+      new.role <> 'owner'
+      or new.album_id <> old.album_id
+      or new.user_id <> old.user_id
+    ) then
+    raise exception 'オーナー権限は変更できません';
+  end if;
+
+  if new.role = 'owner' then
+    select album.owner_id into album_owner
+    from public.albums as album
+    where album.id = new.album_id;
+    if album_owner is null or album_owner <> new.user_id then
+      raise exception 'アルバム作成者以外をオーナーにはできません';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+create or replace function public.can_invite_album(target_album_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(
+    public.is_album_manager(target_album_id)
+    or exists (
+      select 1
+      from public.albums as album
+      where album.id = target_album_id
+        and album.members_can_invite
+        and public.current_album_role(album.id) = 'member'
+    ),
+    false
+  );
+$$;
+
+create or replace function public.get_album_invite_settings(p_album_id uuid)
+returns table (
+  invite_code text,
+  invite_code_enabled boolean,
+  invite_code_expires_at timestamptz,
+  members_can_invite boolean,
+  can_manage boolean,
+  can_invite boolean
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'ログインが必要です';
+  end if;
+  if not public.can_invite_album(p_album_id) then
+    raise exception '招待情報を表示する権限がありません';
+  end if;
+
+  return query
+  select
+    album.invite_code,
+    album.invite_code_enabled,
+    album.invite_code_expires_at,
+    album.members_can_invite,
+    public.is_album_manager(album.id),
+    public.can_invite_album(album.id)
+  from public.albums as album
+  where album.id = p_album_id;
+end;
+$$;
+
+create or replace function public.get_album_invite_code(p_album_id uuid)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  result text;
+begin
+  if auth.uid() is null then
+    raise exception 'ログインが必要です';
+  end if;
+  if not public.can_invite_album(p_album_id) then
+    raise exception '招待情報を表示する権限がありません';
+  end if;
+
+  select album.invite_code into result
+  from public.albums as album
+  where album.id = p_album_id
+    and album.invite_code_enabled
+    and album.invite_code_expires_at > now();
+  if result is null then
+    raise exception '招待コードが無効か、有効期限が切れています';
+  end if;
+  return result;
+end;
+$$;
+
+create or replace function public.rotate_album_invite_code(
+  p_album_id uuid,
+  p_expires_at timestamptz
+)
+returns text
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  next_code text;
+begin
+  if auth.uid() is null then
+    raise exception 'ログインが必要です';
+  end if;
+  if not public.is_album_manager(p_album_id) then
+    raise exception '招待コードを再発行する権限がありません';
+  end if;
+  if p_expires_at <= now() + interval '1 hour'
+    or p_expires_at > now() + interval '1 year' then
+    raise exception '有効期限は1時間後から1年後までで設定してください';
+  end if;
+
+  loop
+    next_code := upper(substr(encode(gen_random_bytes(16), 'hex'), 1, 16));
+    exit when not exists (
+      select 1 from public.albums where invite_code = next_code
+    );
+  end loop;
+
+  update public.albums
+  set
+    invite_code = next_code,
+    invite_code_enabled = true,
+    invite_code_expires_at = p_expires_at
+  where id = p_album_id;
+  if not found then
+    raise exception 'アルバムが見つかりません';
+  end if;
+  return next_code;
+end;
+$$;
+
+create or replace function public.update_album_invite_settings(
+  p_album_id uuid,
+  p_members_can_invite boolean,
+  p_invite_code_enabled boolean,
+  p_invite_code_expires_at timestamptz
+)
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'ログインが必要です';
+  end if;
+  if not public.is_album_manager(p_album_id) then
+    raise exception '招待設定を変更する権限がありません';
+  end if;
+  if p_invite_code_enabled
+    and (
+      p_invite_code_expires_at <= now() + interval '1 hour'
+      or p_invite_code_expires_at > now() + interval '1 year'
+    ) then
+    raise exception '有効期限は1時間後から1年後までで設定してください';
+  end if;
+
+  update public.albums
+  set
+    members_can_invite = p_members_can_invite,
+    invite_code_enabled = p_invite_code_enabled,
+    invite_code_expires_at = p_invite_code_expires_at
+  where id = p_album_id;
+end;
+$$;
+
+create or replace function public.create_album_invitation(
+  p_album_id uuid,
+  p_email text,
+  p_role public.album_role_v2 default 'member'
+)
+returns table (
+  id uuid,
+  album_id uuid,
+  email text,
+  token uuid,
+  role public.album_role_v2,
+  status text,
+  created_at timestamptz,
+  expires_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  normalized_email text := lower(trim(p_email));
+  granted_role public.album_role_v2;
+begin
+  if auth.uid() is null then
+    raise exception 'ログインが必要です';
+  end if;
+  if not public.can_invite_album(p_album_id) then
+    raise exception '招待を作成する権限がありません';
+  end if;
+  if normalized_email !~* '^[^[:space:]@]+@[^[:space:]@]+\.[^[:space:]@]+$' then
+    raise exception '正しいメールアドレスを入力してください';
+  end if;
+  if p_role is null or p_role = 'owner' then
+    raise exception 'オーナー権限は招待に指定できません';
+  end if;
+  granted_role := case
+    when public.is_album_manager(p_album_id) then p_role
+    else 'member'::public.album_role_v2
+  end;
+  if exists (
+    select 1
+    from public.album_members as member
+    join auth.users as invited_user on invited_user.id = member.user_id
+    where member.album_id = p_album_id
+      and lower(invited_user.email) = normalized_email
+  ) then
+    raise exception 'このメールアドレスはすでに参加しています';
+  end if;
+
+  update public.album_invitations
+  set status = 'revoked'
+  where album_id = p_album_id
+    and email = normalized_email
+    and status = 'pending';
+
+  return query
+  insert into public.album_invitations (
+    album_id, email, role, invited_by
+  )
+  values (
+    p_album_id, normalized_email, granted_role, auth.uid()
+  )
+  returning
+    album_invitations.id,
+    album_invitations.album_id,
+    album_invitations.email,
+    album_invitations.token,
+    album_invitations.role,
+    album_invitations.status,
+    album_invitations.created_at,
+    album_invitations.expires_at;
+end;
+$$;
+
+create or replace function public.request_album_membership(
+  p_invite_code text default null,
+  p_invite_token uuid default null
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  target_album_id uuid;
+  target_invitation_id uuid;
+  target_role public.album_role_v2 := 'member';
+  target_email text;
+  current_email text;
+  current_email_is_verified boolean;
+  existing_request_id uuid;
+  new_request_id uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'ログインが必要です';
+  end if;
+  select lower(email), email_confirmed_at is not null
+    into current_email, current_email_is_verified
+  from auth.users where id = auth.uid();
+
+  if p_invite_token is not null then
+    select invitation.album_id, invitation.id, invitation.role, invitation.email
+      into target_album_id, target_invitation_id, target_role, target_email
+    from public.album_invitations as invitation
+    where invitation.token = p_invite_token
+      and invitation.status = 'pending'
+      and invitation.expires_at > now()
+    limit 1;
+    if target_album_id is null then
+      raise exception '招待URLが無効か、有効期限が切れています';
+    end if;
+    if current_email is distinct from lower(target_email) then
+      raise exception '招待されたメールアドレスでログインしてください';
+    end if;
+  elsif nullif(trim(p_invite_code), '') is not null then
+    select album.id into target_album_id
+    from public.albums as album
+    where upper(replace(album.invite_code, '-', '')) =
+          upper(replace(trim(p_invite_code), '-', ''))
+      and album.invite_code_enabled
+      and album.invite_code_expires_at > now()
+    limit 1;
+    if target_album_id is null then
+      raise exception '招待コードが無効か、有効期限が切れています';
+    end if;
+  else
+    raise exception '招待コードまたは招待URLが必要です';
+  end if;
+
+  if not coalesce(current_email_is_verified, false) then
+    raise exception 'メールアドレスの確認を完了してください';
+  end if;
+
+  perform 1 from public.albums where id = target_album_id for update;
+  if not found then
+    raise exception 'アルバムが見つかりません';
+  end if;
+  if target_invitation_id is not null and not exists (
+    select 1 from public.album_invitations
+    where id = target_invitation_id
+      and album_id = target_album_id
+      and status = 'pending'
+      and expires_at > now()
+      and lower(email) = current_email
+  ) then
+    raise exception '招待URLが無効か、有効期限が切れています';
+  end if;
+  if exists (
+    select 1 from public.album_members
+    where album_id = target_album_id and user_id = auth.uid()
+  ) then
+    raise exception 'このアルバムにはすでに参加しています';
+  end if;
+
+  select id into existing_request_id
+  from public.album_join_requests
+  where album_id = target_album_id
+    and user_id = auth.uid()
+    and status = 'pending'
+  for update;
+  if existing_request_id is not null then
+    return existing_request_id;
+  end if;
+
+  insert into public.album_join_requests (
+    album_id, user_id, invitation_id, requested_role
+  )
+  values (
+    target_album_id, auth.uid(), target_invitation_id, target_role
+  )
+  returning id into new_request_id;
+  return new_request_id;
+end;
+$$;
+
+create or replace function public.create_nearby_invitation(
+  p_album_id uuid,
+  p_invited_user_id uuid
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  result_id uuid;
+begin
+  if auth.uid() is null then raise exception 'ログインが必要です'; end if;
+  if p_invited_user_id is null or p_invited_user_id = auth.uid() then
+    raise exception '招待するユーザーを確認できません';
+  end if;
+  if not public.can_invite_album(p_album_id) then
+    raise exception 'このアルバムへ招待する権限がありません';
+  end if;
+  if exists (
+    select 1 from public.album_members
+    where album_id = p_album_id and user_id = p_invited_user_id
+  ) then
+    raise exception 'このユーザーはすでにアルバムへ参加しています';
+  end if;
+
+  update public.nearby_invitations
+  set status = 'expired', responded_at = now()
+  where album_id = p_album_id
+    and invited_user_id = p_invited_user_id
+    and status = 'pending'
+    and expires_at <= now();
+
+  insert into public.nearby_invitations (
+    album_id, invited_user_id, invited_by
+  )
+  values (p_album_id, p_invited_user_id, auth.uid())
+  on conflict (album_id, invited_user_id)
+    where status = 'pending'
+  do update set
+    invited_by = excluded.invited_by,
+    created_at = now(),
+    expires_at = now() + interval '5 minutes'
+  returning id into result_id;
+  return result_id;
+end;
+$$;
+
+create or replace function public.upsert_push_subscription(
+  p_endpoint text,
+  p_p256dh text,
+  p_auth text,
+  p_user_agent text default ''
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  result_id uuid;
+begin
+  if auth.uid() is null then raise exception 'ログインが必要です'; end if;
+  if length(p_endpoint) < 20 or length(p_endpoint) > 4000
+    or length(p_p256dh) < 20 or length(p_auth) < 8 then
+    raise exception 'Push通知の購読情報が正しくありません';
+  end if;
+  insert into public.push_subscriptions (
+    user_id, endpoint, p256dh, auth_key, user_agent, enabled
+  )
+  values (
+    auth.uid(), p_endpoint, p_p256dh, p_auth,
+    left(coalesce(p_user_agent, ''), 500), true
+  )
+  on conflict (endpoint) do update set
+    user_id = auth.uid(),
+    p256dh = excluded.p256dh,
+    auth_key = excluded.auth_key,
+    user_agent = excluded.user_agent,
+    enabled = true,
+    updated_at = now()
+  returning id into result_id;
+  return result_id;
+end;
+$$;
+
+create or replace function public.delete_push_subscription(p_endpoint text)
+returns void
+language sql
+security definer
+set search_path = ''
+as $$
+  delete from public.push_subscriptions
+  where user_id = auth.uid() and endpoint = p_endpoint;
+$$;
+
+revoke all on function public.can_invite_album(uuid) from public;
+revoke all on function public.get_album_invite_settings(uuid) from public;
+revoke all on function public.rotate_album_invite_code(uuid, timestamptz) from public;
+revoke all on function public.update_album_invite_settings(
+  uuid, boolean, boolean, timestamptz
+) from public;
+revoke all on function public.upsert_push_subscription(
+  text, text, text, text
+) from public;
+revoke all on function public.delete_push_subscription(text) from public;
+
+grant execute on function public.can_invite_album(uuid) to authenticated;
+grant execute on function public.get_album_invite_settings(uuid) to authenticated;
+grant execute on function public.rotate_album_invite_code(uuid, timestamptz)
+  to authenticated;
+grant execute on function public.update_album_invite_settings(
+  uuid, boolean, boolean, timestamptz
+) to authenticated;
+grant execute on function public.upsert_push_subscription(
+  text, text, text, text
+) to authenticated;
+grant execute on function public.delete_push_subscription(text)
+  to authenticated;
+
+alter table public.push_subscriptions enable row level security;
+revoke all on table public.push_subscriptions from anon;
+revoke all on table public.push_subscriptions from authenticated;
+grant select, delete on table public.push_subscriptions to authenticated;
+
+drop policy if exists "users manage own push subscriptions"
+  on public.push_subscriptions;
+create policy "users manage own push subscriptions"
+on public.push_subscriptions for select
+to authenticated
+using (user_id = auth.uid());
+
+drop policy if exists "users delete own push subscriptions"
+  on public.push_subscriptions;
+create policy "users delete own push subscriptions"
+on public.push_subscriptions for delete
+to authenticated
+using (user_id = auth.uid());
+
+grant select (
+  id,
+  name,
+  description,
+  owner_id,
+  created_by,
+  created_at,
+  members_can_invite
+) on table public.albums to authenticated;
+
+drop policy if exists "users create albums" on public.albums;
+create policy "users create albums"
+on public.albums for insert
+to authenticated
+with check (
+  created_by = auth.uid()
+  and owner_id = auth.uid()
+);

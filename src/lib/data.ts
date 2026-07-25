@@ -1,6 +1,7 @@
 import { del, get, keys, set } from "idb-keyval";
 import type {
   Album,
+  AlbumInviteSettings,
   AlbumInvitation,
   AlbumJoinRequest,
   AlbumMember,
@@ -60,7 +61,9 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
     ] = await Promise.all([
       client
         .from("albums")
-        .select("id, name, description, created_by, created_at")
+        .select(
+          "id, name, description, owner_id, created_by, created_at, members_can_invite",
+        )
         .order("created_at", { ascending: false }),
       client
         .from("album_members")
@@ -98,7 +101,14 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
           description: album.description ?? "",
           invite_code: "",
           created_by: album.created_by,
+          owner_id: album.owner_id,
           created_at: album.created_at,
+          members_can_invite: album.members_can_invite ?? false,
+          can_invite:
+            roleByAlbum.get(album.id) === "owner" ||
+            roleByAlbum.get(album.id) === "admin" ||
+            (roleByAlbum.get(album.id) === "member" &&
+              Boolean(album.members_can_invite)),
           cover_url: null,
           role: roleByAlbum.get(album.id) ?? "viewer",
           photo_count: photoCounts.get(album.id) ?? 0,
@@ -203,7 +213,7 @@ export async function createAlbum(name: string, description: string) {
       [
         `albums INSERT${responseLabel ? ` (${responseLabel})` : ""}`,
         `auth.uid(): ${user.id}`,
-        "owner column: created_by = auth.uid() (database default)",
+        "owner columns: owner_id / created_by = auth.uid() (database enforced)",
         responseError,
       ].join("\n"),
     );
@@ -284,6 +294,55 @@ export async function loadAlbumInviteCode(albumID: string) {
   if (error) throw error;
   if (typeof data !== "string" || !data) {
     throw new Error("招待コードを取得できませんでした。");
+  }
+  return data;
+}
+
+export async function loadAlbumInviteSettings(
+  albumID: string,
+): Promise<AlbumInviteSettings> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc("get_album_invite_settings", {
+    p_album_id: albumID,
+  });
+  if (error) throw error;
+  const row = (Array.isArray(data) ? data[0] : data) as
+    | AlbumInviteSettings
+    | null;
+  if (!row?.invite_code) {
+    throw new Error("招待設定を取得できませんでした。");
+  }
+  return row;
+}
+
+export async function updateAlbumInviteSettings(input: {
+  albumID: string;
+  membersCanInvite: boolean;
+  enabled: boolean;
+  expiresAt: string;
+}) {
+  const client = requireSupabase();
+  const { error } = await client.rpc("update_album_invite_settings", {
+    p_album_id: input.albumID,
+    p_members_can_invite: input.membersCanInvite,
+    p_invite_code_enabled: input.enabled,
+    p_invite_code_expires_at: input.expiresAt,
+  });
+  if (error) throw error;
+}
+
+export async function rotateAlbumInviteCode(
+  albumID: string,
+  expiresAt: string,
+) {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc("rotate_album_invite_code", {
+    p_album_id: albumID,
+    p_expires_at: expiresAt,
+  });
+  if (error) throw error;
+  if (typeof data !== "string" || !data) {
+    throw new Error("招待コードを再発行できませんでした。");
   }
   return data;
 }
@@ -444,6 +503,26 @@ export async function loadMyPendingJoinRequests(
     .order("created_at");
   if (error) throw error;
   return (data ?? []) as AlbumJoinRequest[];
+}
+
+export async function loadManagedJoinRequests(albums: Album[]) {
+  const managedAlbums = albums.filter(
+    (album) => album.role === "owner" || album.role === "admin",
+  );
+  const rows = await Promise.all(
+    managedAlbums.map(async (album) =>
+      (await loadJoinRequests(album.id)).map((request) => ({
+        ...request,
+        album_name: album.name,
+      })),
+    ),
+  );
+  return rows
+    .flat()
+    .sort(
+      (first, second) =>
+        Date.parse(first.created_at) - Date.parse(second.created_at),
+    );
 }
 
 export async function reviewJoinRequest(

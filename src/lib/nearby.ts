@@ -9,12 +9,15 @@ import { distanceInMeters } from "./location";
 import { supabase } from "./supabase";
 
 const NEARBY_TOPIC = "nearby-users";
-const MAX_DISTANCE_METERS = 50;
+const MAX_DISTANCE_METERS = 100;
 const MAX_AGE_MS = 5 * 60 * 1_000;
 const HEARTBEAT_MS = 60_000;
 const COORDINATE_SCALE = 10_000;
+const MAX_ACCEPTABLE_ACCURACY_METERS = 200;
 
 type PresencePayload = {
+  userId: string;
+  displayName: string;
   latitudeE4: number;
   longitudeE4: number;
   updatedAt: string;
@@ -41,10 +44,14 @@ function requireSupabase() {
 }
 
 export function roundPresencePosition(position: {
+  userId: string;
+  displayName: string;
   latitude: number;
   longitude: number;
 }): PresencePayload {
   return {
+    userId: position.userId,
+    displayName: position.displayName.slice(0, 80),
     latitudeE4: Math.round(position.latitude * COORDINATE_SCALE),
     longitudeE4: Math.round(position.longitude * COORDINATE_SCALE),
     updatedAt: new Date().toISOString(),
@@ -69,6 +76,8 @@ export function activeNearbyUserIDs(
         (presence): presence is PresencePayload =>
           Number.isInteger(presence.latitudeE4) &&
           Number.isInteger(presence.longitudeE4) &&
+          presence.userId === userID &&
+          typeof presence.displayName === "string" &&
           typeof presence.updatedAt === "string",
       )
       .sort(
@@ -177,7 +186,7 @@ export function useNearbyPeople(input: {
 }) {
   const [enabled, setEnabled] = useState(false);
   const [status, setStatus] = useState<
-    "off" | "locating" | "online" | "unavailable"
+    "off" | "locating" | "online" | "offline" | "unavailable"
   >("off");
   const [error, setError] = useState("");
   const [nearbyUsers, setNearbyUsers] = useState<NearbyUser[]>([]);
@@ -187,6 +196,7 @@ export function useNearbyPeople(input: {
   const [pageVisible, setPageVisible] = useState(
     () => document.visibilityState === "visible",
   );
+  const [networkOnline, setNetworkOnline] = useState(() => navigator.onLine);
   const channelRef = useRef<RealtimeChannel | null>(null);
   const watchIDRef = useRef<number | undefined>(undefined);
   const heartbeatRef = useRef<number | undefined>(undefined);
@@ -235,6 +245,17 @@ export function useNearbyPeople(input: {
   }, []);
 
   useEffect(() => {
+    const online = () => setNetworkOnline(true);
+    const offline = () => setNetworkOnline(false);
+    window.addEventListener("online", online);
+    window.addEventListener("offline", offline);
+    return () => {
+      window.removeEventListener("online", online);
+      window.removeEventListener("offline", offline);
+    };
+  }, []);
+
+  useEffect(() => {
     excludedUserIDsRef.current = new Set([input.user.id]);
     if (!input.selectedAlbumID || !input.canInvite) return;
 
@@ -258,6 +279,15 @@ export function useNearbyPeople(input: {
         setStatus("off");
         setIncomingInvitations([]);
       }
+      return;
+    }
+
+    if (!networkOnline) {
+      void stopPresence();
+      setStatus("offline");
+      setError(
+        "オフラインのため近くの人を検索できません。接続後に自動で再開します。",
+      );
       return;
     }
 
@@ -303,12 +333,29 @@ export function useNearbyPeople(input: {
       channel: RealtimeChannel,
     ) => {
       ownPositionRef.current = position;
-      await channel.track(roundPresencePosition(position));
+      await channel.track(
+        roundPresencePosition({
+          ...position,
+          userId: input.user.id,
+          displayName: input.user.displayName,
+        }),
+      );
       await refreshNearby(channel);
     };
 
     const start = (position: GeolocationPosition) => {
       if (generationRef.current !== generation) return;
+      if (
+        Number.isFinite(position.coords.accuracy) &&
+        position.coords.accuracy > MAX_ACCEPTABLE_ACCURACY_METERS
+      ) {
+        setError(
+          "GPSの精度が十分ではありません。空が見える場所で再度ONにするか、QR・URL・招待コードをご利用ください。",
+        );
+        setStatus("unavailable");
+        setEnabled(false);
+        return;
+      }
       const initialPosition = {
         latitude: position.coords.latitude,
         longitude: position.coords.longitude,
@@ -345,6 +392,16 @@ export function useNearbyPeople(input: {
 
       watchIDRef.current = navigator.geolocation.watchPosition(
         (nextPosition) => {
+          if (
+            Number.isFinite(nextPosition.coords.accuracy) &&
+            nextPosition.coords.accuracy > MAX_ACCEPTABLE_ACCURACY_METERS
+          ) {
+            setError(
+              "GPSの精度を確認しています。空が見える場所へ移動してください。",
+            );
+            return;
+          }
+          setError("");
           void trackPosition(
             {
               latitude: nextPosition.coords.latitude,
@@ -416,6 +473,8 @@ export function useNearbyPeople(input: {
   }, [
     enabled,
     input.user.id,
+    input.user.displayName,
+    networkOnline,
     pageVisible,
     refreshIncomingInvitations,
     stopPresence,

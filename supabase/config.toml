@@ -1,2 +1,5 @@
 [functions.send-album-invite]
 verify_jwt = true
+
+[functions.send-join-request-push]
+verify_jwt = false

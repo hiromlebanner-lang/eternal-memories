@@ -111,6 +111,7 @@ export default defineConfig({
         cleanupOutdatedCaches: true,
         clientsClaim: true,
         skipWaiting: true,
+        importScripts: ["/push-sw.js"],
         navigateFallback: "/index.html",
         globPatterns: ["**/*.{js,css,html,png,jpg,jpeg,webp,woff2}"],
         runtimeCaching: [

@@ -21,11 +21,25 @@ export interface Album {
   description: string;
   invite_code: string;
   created_by: string;
+  owner_id?: string;
   created_at: string;
+  members_can_invite?: boolean;
+  can_invite?: boolean;
+  invite_code_enabled?: boolean;
+  invite_code_expires_at?: string;
   cover_url?: string | null;
   role: AlbumRole;
   photo_count?: number;
   member_count?: number;
+}
+
+export interface AlbumInviteSettings {
+  invite_code: string;
+  invite_code_enabled: boolean;
+  invite_code_expires_at: string;
+  members_can_invite: boolean;
+  can_manage: boolean;
+  can_invite: boolean;
 }
 
 export interface AlbumMember {
@@ -56,6 +70,7 @@ export interface AlbumJoinRequest {
   requested_role: Exclude<AlbumRole, "owner">;
   status: "pending" | "approved" | "rejected";
   created_at: string;
+  album_name?: string;
   display_name?: string;
   email?: string;
 }

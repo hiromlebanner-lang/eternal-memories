@@ -12,6 +12,7 @@ const tables = [
   "album_invitations",
   "album_join_requests",
   "nearby_invitations",
+  "push_subscriptions",
 ];
 
 describe("Supabase RLS・未ログイン遮断", () => {
@@ -86,6 +87,66 @@ describe("Supabase RLS・未ログイン遮断", () => {
     );
     expect(schema).toMatch(
       /create table if not exists public\.nearby_invitations[\s\S]*expires_at timestamptz not null default \(now\(\) \+ interval '5 minutes'\)/,
+    );
+  });
+
+  it("参加申請は本人と管理者だけが閲覧でき、承認を行ロックで直列化する", () => {
+    expect(schema).toMatch(
+      /create policy "managers view join requests"[\s\S]*to authenticated[\s\S]*public\.is_album_manager\(album_id\)[\s\S]*user_id = auth\.uid\(\)/,
+    );
+    expect(schema).toMatch(
+      /function public\.can_view_profile[\s\S]*request\.status = 'pending'[\s\S]*public\.is_album_manager\(request\.album_id\)/,
+    );
+    expect(schema).toMatch(
+      /function public\.review_album_join_request[\s\S]*where id = p_request_id[\s\S]*for update[\s\S]*target_request\.status <> 'pending'/,
+    );
+    expect(schema).toMatch(
+      /pubname = 'supabase_realtime'[\s\S]*tablename = 'album_join_requests'/,
+    );
+  });
+
+  it("アルバム作成者をowner_idへ固定し、クライアントから変更できない", () => {
+    expect(schema).toContain(
+      "add column if not exists owner_id uuid references public.profiles(id)",
+    );
+    expect(schema).toMatch(
+      /function public\.protect_album_identity[\s\S]*new\.owner_id := auth\.uid\(\)[\s\S]*new\.owner_id is distinct from old\.owner_id/,
+    );
+    expect(schema).toMatch(
+      /create policy "users create albums"[\s\S]*created_by = auth\.uid\(\)[\s\S]*owner_id = auth\.uid\(\)/,
+    );
+  });
+
+  it("招待コードをアルバム単位で期限管理し、再発行で旧コードを失効する", () => {
+    expect(schema).toContain(
+      "add column if not exists invite_code_expires_at",
+    );
+    expect(schema).toContain(
+      "add column if not exists members_can_invite boolean not null default false",
+    );
+    expect(schema).toMatch(
+      /function public\.rotate_album_invite_code[\s\S]*invite_code = next_code[\s\S]*invite_code_enabled = true/,
+    );
+    expect(schema).toMatch(
+      /function public\.request_album_membership[\s\S]*album\.invite_code_enabled[\s\S]*album\.invite_code_expires_at > now\(\)/,
+    );
+    expect(schema).toContain(
+      "create unique index if not exists album_join_requests_one_pending_user_idx",
+    );
+  });
+
+  it("Push購読は本人単位で保存し、ブラウザーへService Roleを公開しない", () => {
+    expect(schema).toContain(
+      "create table if not exists public.push_subscriptions",
+    );
+    expect(schema).toContain(
+      'create policy "users manage own push subscriptions"',
+    );
+    expect(schema).toMatch(
+      /function public\.upsert_push_subscription[\s\S]*auth\.uid\(\)[\s\S]*on conflict \(endpoint\)/,
+    );
+    expect(schema).toContain(
+      "revoke all on table public.push_subscriptions from anon;",
     );
   });
 });

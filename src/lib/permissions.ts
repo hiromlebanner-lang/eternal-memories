@@ -4,6 +4,13 @@ export function canManageAlbum(role?: AlbumRole) {
   return role === "owner" || role === "admin";
 }
 
+export function canInviteToAlbum(
+  role?: AlbumRole,
+  membersCanInvite = false,
+) {
+  return canManageAlbum(role) || (role === "member" && membersCanInvite);
+}
+
 export function canPostPhoto(role?: AlbumRole) {
   return canManageAlbum(role) || role === "member";
 }

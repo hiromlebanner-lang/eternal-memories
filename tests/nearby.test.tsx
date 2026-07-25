@@ -114,37 +114,47 @@ beforeEach(() => {
 describe("近距離Presence", () => {
   it("座標を約11m単位へ丸め、更新時刻だけを付加する", () => {
     const payload = roundPresencePosition({
+      userId: "user-1",
+      displayName: "ひなた",
       latitude: 35.681236,
       longitude: 139.767125,
     });
     expect(payload.latitudeE4).toBe(356812);
     expect(payload.longitudeE4).toBe(1397671);
     expect(payload).toEqual({
+      userId: "user-1",
+      displayName: "ひなた",
       latitudeE4: 356812,
       longitudeE4: 1397671,
       updatedAt: expect.any(String),
     });
   });
 
-  it("50m以内・5分以内だけを候補にし、既存メンバーを除外する", () => {
+  it("100m以内・5分以内だけを候補にし、既存メンバーを除外する", () => {
     const now = Date.parse("2026-07-25T10:00:00.000Z");
     const state = {
       nearby: [
         {
+          userId: "nearby",
+          displayName: "近くの人",
           latitudeE4: 356812,
-          longitudeE4: 1397672,
+          longitudeE4: 1397680,
           updatedAt: new Date(now - 60_000).toISOString(),
         },
       ],
       far: [
         {
-          latitudeE4: 356900,
-          longitudeE4: 1398000,
+          userId: "far",
+          displayName: "遠くの人",
+          latitudeE4: 356812,
+          longitudeE4: 1397683,
           updatedAt: new Date(now - 60_000).toISOString(),
         },
       ],
       stale: [
         {
+          userId: "stale",
+          displayName: "古い人",
           latitudeE4: 356812,
           longitudeE4: 1397672,
           updatedAt: new Date(now - 6 * 60_000).toISOString(),
@@ -152,6 +162,8 @@ describe("近距離Presence", () => {
       ],
       member: [
         {
+          userId: "member",
+          displayName: "メンバー",
           latitudeE4: 356812,
           longitudeE4: 1397672,
           updatedAt: new Date(now - 60_000).toISOString(),
@@ -192,6 +204,8 @@ describe("近距離Presence", () => {
     const clearWatch = vi.fn();
     realtime.presenceState["user-2"] = [
       {
+        userId: "user-2",
+        displayName: "あおい",
         latitudeE4: 356812,
         longitudeE4: 1397672,
         updatedAt: new Date().toISOString(),
@@ -281,7 +295,9 @@ describe("近距離Presence", () => {
     );
 
     expect(screen.getByText("近くにあおいさんがいます")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "招待する" }));
+    await user.click(
+      screen.getByRole("button", { name: "このアルバムへ招待" }),
+    );
     expect(onInvite).toHaveBeenCalledWith({
       id: "user-2",
       displayName: "あおい",

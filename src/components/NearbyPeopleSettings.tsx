@@ -14,7 +14,7 @@ import type {
 
 interface NearbyPeopleSettingsProps {
   enabled: boolean;
-  status: "off" | "locating" | "online" | "unavailable";
+  status: "off" | "locating" | "online" | "offline" | "unavailable";
   error: string;
   album?: Album;
   canInvite: boolean;
@@ -55,7 +55,7 @@ export function NearbyPeopleSettings({
         <Radar size={19} aria-hidden="true" />
         <span>
           <strong id="nearby-heading">近くの人を探す</strong>
-          <small>アプリを開いている間だけ、50m以内を検索</small>
+          <small>アプリを開いている間だけ、100m以内を検索</small>
         </span>
         <span className={enabled ? "toggle is-on" : "toggle"} />
       </button>
@@ -74,6 +74,8 @@ export function NearbyPeopleSettings({
               ? "位置情報を確認しています…"
               : status === "online"
                 ? "近くのログインユーザーを検索中"
+                : status === "offline"
+                  ? "オフライン"
                 : "検索を開始できませんでした"}
           </div>
 
@@ -125,19 +127,19 @@ export function NearbyPeopleSettings({
                       onClick={() => onInvite(candidate)}
                     >
                       <UserPlus size={15} aria-hidden="true" />
-                      招待する
+                      このアルバムへ招待
                     </button>
                   </article>
                 ))}
               </div>
             ) : status === "online" ? (
               <p className="nearby-empty">
-                50m以内で検索をONにしている招待候補はまだ見つかりません。
+                100m以内で検索をONにしている招待候補はまだ見つかりません。
               </p>
             ) : null
           ) : (
             <p className="nearby-empty">
-              招待するには、オーナーまたは管理者としてアルバムを選択してください。
+              このアルバムで招待できるのは、オーナー・管理者、または招待を許可されたメンバーです。
             </p>
           )}
         </div>

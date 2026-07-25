@@ -4,8 +4,12 @@ import { beforeEach, expect, it, vi } from "vitest";
 import { album } from "./fixtures";
 
 const invitationMock = vi.hoisted(() => vi.fn());
+const updateSettingsMock = vi.hoisted(() => vi.fn());
+const rotateCodeMock = vi.hoisted(() => vi.fn());
 vi.mock("../src/lib/data", () => ({
   createEmailInvitation: invitationMock,
+  rotateAlbumInviteCode: rotateCodeMock,
+  updateAlbumInviteSettings: updateSettingsMock,
 }));
 vi.mock("../src/components/InviteQRCode", () => ({
   InviteQRCode: ({ value }: { value: string }) => (
@@ -22,6 +26,8 @@ beforeEach(() => {
     invitation: { token: "invite-token" },
     emailSent: false,
   });
+  updateSettingsMock.mockResolvedValue(undefined);
+  rotateCodeMock.mockResolvedValue("NEWCODE123456789");
 });
 
 it("10 招待URLとQRをサブパスを保って発行する", () => {
@@ -77,8 +83,114 @@ it("メンバーには招待発行UIを表示しない", () => {
   );
   expect(screen.queryByText("招待URL")).not.toBeInTheDocument();
   expect(
-    screen.getByText(/招待はオーナー・管理者のみ/),
+    screen.getByText(/このアルバムでは招待が許可されていません/),
   ).toBeInTheDocument();
+});
+
+it("共有画面上部に参加申請件数を表示し管理画面を直接開く", async () => {
+  const user = userEvent.setup();
+  const onManageMembers = vi.fn();
+  render(
+    <ShareAlbumModal
+      album={album("owner")}
+      onClose={vi.fn()}
+      onManageMembers={onManageMembers}
+      onNotice={vi.fn()}
+      pendingJoinRequestCount={3}
+    />,
+  );
+
+  const shortcut = screen.getByRole("button", { name: /参加申請 3件/ });
+  expect(shortcut).toHaveTextContent("承認または拒否する申請があります");
+  await user.click(shortcut);
+  expect(onManageMembers).toHaveBeenCalledOnce();
+});
+
+it("参加申請が99件を超える場合は99+と表示する", () => {
+  render(
+    <ShareAlbumModal
+      album={album("admin")}
+      onClose={vi.fn()}
+      onManageMembers={vi.fn()}
+      onNotice={vi.fn()}
+      pendingJoinRequestCount={120}
+    />,
+  );
+
+  expect(screen.getByText("99+")).toBeInTheDocument();
+});
+
+it("管理者はアルバム別の招待期限とメンバー招待許可を保存できる", async () => {
+  const user = userEvent.setup();
+  render(
+    <ShareAlbumModal
+      album={{
+        ...album("owner"),
+        invite_code_expires_at: "2026-08-25T10:00:00.000Z",
+      }}
+      onClose={vi.fn()}
+      onManageMembers={vi.fn()}
+      onNotice={vi.fn()}
+    />,
+  );
+
+  await user.click(screen.getByLabelText("一般メンバーの招待を許可"));
+  await user.click(screen.getByRole("button", { name: "設定を保存" }));
+  expect(updateSettingsMock).toHaveBeenCalledWith(
+    expect.objectContaining({
+      albumID: album().id,
+      membersCanInvite: true,
+      enabled: true,
+    }),
+  );
+});
+
+it("再発行すると古い招待コードを置き換える", async () => {
+  const user = userEvent.setup();
+  render(
+    <ShareAlbumModal
+      album={{
+        ...album("admin"),
+        invite_code_expires_at: "2026-08-25T10:00:00.000Z",
+      }}
+      onClose={vi.fn()}
+      onManageMembers={vi.fn()}
+      onNotice={vi.fn()}
+    />,
+  );
+
+  await user.click(
+    screen.getByRole("button", {
+      name: "古いコードを無効化して再発行",
+    }),
+  );
+  expect(rotateCodeMock).toHaveBeenCalledWith(
+    album().id,
+    expect.any(String),
+  );
+  expect(
+    await screen.findByText("NEWCODE123456789"),
+  ).toBeInTheDocument();
+});
+
+it("招待を許可された一般メンバーは対象アルバムを共有できる", () => {
+  render(
+    <ShareAlbumModal
+      album={{
+        ...album("member"),
+        can_invite: true,
+        members_can_invite: true,
+      }}
+      onClose={vi.fn()}
+      onManageMembers={vi.fn()}
+      onNotice={vi.fn()}
+    />,
+  );
+  expect(screen.getByText("招待URL")).toBeInTheDocument();
+  expect(
+    screen.getByText("このアルバムではメンバー招待が許可されています"),
+  ).toBeInTheDocument();
+  expect(screen.getByLabelText("承認後の権限")).toHaveValue("member");
 });
 
 it("Web Share APIでiPhoneの標準共有シートを開き成功を通知する", async () => {

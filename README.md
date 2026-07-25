@@ -169,6 +169,7 @@ Visual Studio Codeの `code` コマンドが使えない場合は、エクスプ
 ```env
 VITE_SUPABASE_URL=https://abcdefghijklmnop.supabase.co
 VITE_SUPABASE_ANON_KEY=sb_publishable_xxxxxxxxxxxxxxxxx
+VITE_VAPID_PUBLIC_KEY=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 - URLの末尾に `/` を追加しない
@@ -205,7 +206,7 @@ SQL Editorへ戻り、`Ctrl + V` で貼り付けます。
 
 このSQLにより次がまとめて作成されます。
 
-- 7つのアプリ用テーブル
+- 8つのアプリ用テーブル
 - 各テーブルのRLS有効化と権限ポリシー
 - Private Storageバケット `album-photos`
 - Storage用RLSポリシー
@@ -223,8 +224,9 @@ SQL Editorへ戻り、`Ctrl + V` で貼り付けます。
 - `album_invitations`
 - `album_join_requests`
 - `nearby_invitations`
+- `push_subscriptions`
 
-SQL実行後、左メニューの `Table Editor` を開き、上の7テーブルが表示されることを確認します。手動でテーブルや「全員許可」ポリシーを追加する必要はありません。
+SQL実行後、左メニューの `Table Editor` を開き、上の8テーブルが表示されることを確認します。手動でテーブルや「全員許可」ポリシーを追加する必要はありません。
 
 SQLは更新時に再実行できますが、本番データがある場合は先にバックアップを取得してください。既存の招待コードは維持され、旧 `editor` 権限は `member`、各アルバム作成者は `owner` へ移行されます。
 
@@ -333,13 +335,13 @@ AppleのWeb OAuth用Client Secretは6か月ごとの更新が必要です。期�
 
 ### 2-8. 公開環境の環境変数へ設定
 
-`.env.local` はWindows上の開発用です。公開サイトでは、利用しているホスティングサービスにも同じ2つの環境変数を登録し、登録後に再ビルド／再デプロイします。
+`.env.local` はWindows上の開発用です。公開サイトでは、利用しているホスティングサービスにも同じ3つの環境変数を登録し、登録後に再ビルド／再デプロイします。
 
 Cloudflare Pages:
 
 1. Cloudflare Dashboardで対象Pagesプロジェクトを開く
 2. `Settings` → `Variables and Secrets`
-3. Productionへ次の2項目を追加する
+3. Productionへ次の3項目を追加する
 4. Preview環境も使う場合は同じ値を追加する
 5. 新しいDeploymentを実行する
 
@@ -347,7 +349,7 @@ Vercel:
 
 1. Vercelで対象Projectを開く
 2. `Settings` → `Environment Variables`
-3. Productionへ次の2項目を追加する
+3. Productionへ次の3項目を追加する
 4. Preview／Developmentも使う場合は対象へチェックを入れる
 5. `Redeploy` を実行する
 
@@ -356,11 +358,12 @@ Vercel:
 ```text
 VITE_SUPABASE_URL = https://abcdefghijklmnop.supabase.co
 VITE_SUPABASE_ANON_KEY = sb_publishable_xxxxxxxxxxxxxxxxx
+VITE_VAPID_PUBLIC_KEY = xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
 ```
 
 Viteの `VITE_` 変数はJavaScriptへ組み込まれるビルド時変数です。変数を追加しただけでは古い公開ファイルは変わらないため、必ず再ビルド／再デプロイしてください。Publishable Keyは公開前提ですが、RLSが安全性を担うため、RLSを無効化してはいけません。
 
-現在のCodex Sites版へ接続する場合も、同じ2値を設定した状態で本番ビルドを作り直す必要があります。値を取得したら、MapAlbumのCodexタスクへ「このSupabase Project URLとPublishable Keyを設定して再公開」と依頼できます。
+現在のCodex Sites版へ接続する場合も、同じ3値を設定した状態で本番ビルドを作り直す必要があります。VAPID鍵をまだ作っていない場合は、アプリ内通知だけを先に利用できます。
 
 ### 2-9. リダイレクトURLを設定
 
@@ -503,7 +506,8 @@ where schemaname = 'public'
     'photos',
     'album_invitations',
     'album_join_requests',
-    'nearby_invitations'
+    'nearby_invitations',
+    'push_subscriptions'
   )
 order by tablename;
 
@@ -517,7 +521,8 @@ where schemaname = 'public'
     'photos',
     'album_invitations',
     'album_join_requests',
-    'nearby_invitations'
+    'nearby_invitations',
+    'push_subscriptions'
   )
 group by tablename
 order by tablename;
@@ -539,8 +544,8 @@ order by policyname;
 
 確認結果:
 
-- 1つ目: 7行すべての `rowsecurity` が `true`
-- 2つ目: 7テーブルすべてに1件以上のPolicy
+- 1つ目: 8行すべての `rowsecurity` が `true`
+- 2つ目: 8テーブルすべてに1件以上のPolicy
 - 3つ目: `album-photos` が1行、`public` が `false`
 - 4つ目: MapAlbum用Storage Policyが3件
 
@@ -574,16 +579,17 @@ order by policyname;
 
 - [ ] `.env.local` に `VITE_SUPABASE_URL` を設定した
 - [ ] `.env.local` に `VITE_SUPABASE_ANON_KEY` を設定した
+- [ ] Pushを使う場合は `.env.local` と本番環境に `VITE_VAPID_PUBLIC_KEY` を設定した
 - [ ] URL末尾の余分な `/`、引用符、空白がない
 - [ ] 開発サーバーを再起動し、未設定警告が消えた
-- [ ] Cloudflare Pages／Vercel／Codex Sitesなど本番環境にも同じ2値を設定した
+- [ ] Cloudflare Pages／Vercel／Codex Sitesなど本番環境にも同じ3値を設定した
 - [ ] 環境変数設定後に再ビルド／再デプロイした
 
 #### SQL・RLS・Storage
 
 - [ ] `supabase/schema.sql` の一部ではなくファイル全体を実行した
-- [ ] `profiles`、`albums`、`album_members`、`photos`、`album_invitations`、`album_join_requests`、`nearby_invitations` が存在する
-- [ ] 7テーブルすべてでRLSがEnabled
+- [ ] `profiles`、`albums`、`album_members`、`photos`、`album_invitations`、`album_join_requests`、`nearby_invitations`、`push_subscriptions` が存在する
+- [ ] 8テーブルすべてでRLSがEnabled
 - [ ] Policyが `authenticated` とアルバム権限を検証している
 - [ ] `anon` 向けの全件許可Policyを追加していない
 - [ ] `album-photos` Bucketが存在する
@@ -715,12 +721,13 @@ Output Directory: dist
 
 ### 3-4. Vercelへ環境変数を設定
 
-最初の `Deploy` を押す前に、`Environment Variables` を開きます。次の2項目を1つずつ追加してください。
+最初の `Deploy` を押す前に、`Environment Variables` を開きます。次の3項目を1つずつ追加してください。
 
 | Name | Value |
 |---|---|
 | `VITE_SUPABASE_URL` | SupabaseのProject URL。例: `https://abcdefghijklmnop.supabase.co` |
 | `VITE_SUPABASE_ANON_KEY` | `sb_publishable_` で始まるPublishable Key |
+| `VITE_VAPID_PUBLIC_KEY` | Web Push用のVAPID Public Key。未設定でもアプリ内通知は動作 |
 
 各変数のEnvironmentは、最初は次の3つすべてを選ぶと迷いにくくなります。
 
@@ -736,7 +743,7 @@ Output Directory: dist
 - `VITE_SUPABASE_ANON_KEY` という名前ですが、値には新しいPublishable Keyを使用できる
 - `VITE_` 変数はビルド時に組み込まれるため、変更後は必ず再デプロイする
 
-プロジェクト作成後に設定する場合は、Vercelの対象Projectを開き、`Settings` → `Environment Variables` から同じ2項目を追加します。追加しただけでは既存Deploymentへ反映されないため、`Deployments` → 最新Deploymentの `…` → `Redeploy` を実行してください。
+プロジェクト作成後に設定する場合は、Vercelの対象Projectを開き、`Settings` → `Environment Variables` から同じ3項目を追加します。追加しただけでは既存Deploymentへ反映されないため、`Deployments` → 最新Deploymentの `…` → `Redeploy` を実行してください。
 
 ### 3-5. 最初のデプロイ
 
@@ -1024,8 +1031,8 @@ PWAとして使う段階ではMacやXcodeは不要です。App Storeへの最終
 
 ```text
 pnpm test
-Test Files  11 passed (11)
-Tests       35 passed (35)
+Test Files  16 passed (16)
+Tests       67 passed (67)
 
 pnpm typecheck
 TypeScript errors: 0
@@ -1061,7 +1068,7 @@ Console warnings: 0
 | 9 | 地図表示 | 合格 | 実機で最終確認推奨 | OpenStreetMap、丸い写真アイコン、カテゴリー、枚数、タップ動作 |
 | 10 | 招待URL発行 | 合格 | DB接続後に要確認 | 汎用URL、メール専用URL、QR値、サブパス維持、参加承認制 |
 | 11 | 権限別制限 | 合格 | 4アカウント実接続は要確認 | owner／admin／member／viewerのUI判定、RLS、RPC、Storage policy |
-| 12 | 未ログインで非表示 | 合格 | Supabase REST直アクセスは要確認 | クライアント非表示、全7テーブルRLS、anon権限取消、Private bucket |
+| 12 | 未ログインで非表示 | 合格 | Supabase REST直アクセスは要確認 | クライアント非表示、全8テーブルRLS、anon権限取消、Private bucket |
 
 `実Supabase・実機E2E` が「要確認」の項目は失敗ではなく、現在の公開環境に `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` が未設定で、実メールアドレス、実データベース、iPhoneのカメラ／GPSへ接続できないため未実施です。実サービスを有効にする前に、このREADMEのSupabase設定手順に従って `supabase/schema.sql` の最新版を適用し、環境変数を設定してください。
 
@@ -1098,7 +1105,7 @@ Bluetoothとバックグラウンド追跡は使用しません。
 
 Presenceへ送る値は、緯度・経度を小数4桁相当の整数へ丸めた値と更新時刻だけです。
 位置情報をアプリのテーブルへ保存しません。相手の画面には座標や距離を表示せず、
-50m以内かつ5分以内に更新された相手だけを
+100m以内かつ5分以内に更新された相手だけを
 「近くに〇〇さんがいます」と表示します。OFF、ログアウト、ページ終了、
 バックグラウンド移行時はGeolocationの監視とPresenceを解除します。
 
@@ -1131,7 +1138,7 @@ Publishable Key以外のキーをPWAへ設定しないでください。
 
 1. iPhone Safariと別のiPhone／iPadで、別アカウントへログインする
 2. 両端末で設定画面の「近くの人を探す」をONにして位置情報を許可する
-3. 端末を50m以内に置き、オーナー側に「近くに〇〇さんがいます」が出ることを確認
+3. 端末を100m以内に置き、オーナー側に「近くに〇〇さんがいます」が出ることを確認
 4. 「招待する」を押し、相手側で「受け取る」を押す
 5. オーナー側の参加申請管理で承認するまで相手が参加しないことを確認
 6. 相手側でOFFまたはログアウトし、オーナー側の候補から消えることを確認
@@ -1150,3 +1157,197 @@ SafariまたはMapAlbumの許可を変更してください。
 5. 上表の1から12までを順番に実行する
 6. iPhone Safariで写真撮影、GPS許可／拒否、ホーム画面起動、オフライン再表示を確認する
 7. ブラウザーのNetworkまたはSupabase RESTから、未ログイン／権限不足の直接操作が401または403になることを確認する
+
+---
+
+## 参加申請・Push通知・アルバム別招待の最終設定
+
+この章は、参加申請のアプリ内通知だけでなく、ホーム画面へ追加したPWAへの
+Web Push通知まで有効にするための手順です。先に `supabase/schema.sql` の
+最新版をSQL Editorで全体実行してください。これにより次が追加・更新されます。
+
+- `albums.owner_id`。既存アルバムは `created_by` から安全に移行
+- アルバム別の招待コード、有効／無効、有効期限、一般メンバーの招待許可
+- ユーザー別のPrivateな `push_subscriptions`
+- 参加申請を一度だけ承認するトランザクションRPC
+- オーナー／管理者だけが他人の参加申請を閲覧できるRLS
+- 一般メンバーが招待できるかをアルバム単位で判定するRPC
+
+### アプリ内通知の動き
+
+アプリ内通知には追加の通知許可は不要です。
+
+1. 参加者が招待URL、QR、または招待コードから「参加を申請」を押す
+2. `album_join_requests` へ `pending` で保存される
+3. アプリを開いているオーナー／管理者がSupabase Realtimeで即時受信する
+4. 「〇〇さんから『アルバム名』への参加申請が届きました」と表示される
+5. 「申請を見る」で対象アルバムの申請管理画面が直接開く
+
+同じ申請IDは端末内へ既読として保存するため、画面復帰のたびに同じポップアップを
+繰り返しません。未処理件数は右上の人＋アイコンと共有画面上部へ表示されます。
+
+### Web Push用のVAPID鍵を作る
+
+Windows PowerShellでプロジェクトフォルダーを開き、次を実行します。
+
+```powershell
+npx web-push generate-vapid-keys
+```
+
+`Public Key` と `Private Key` が表示されます。
+
+- Public KeyはVercelの `VITE_VAPID_PUBLIC_KEY` へ設定
+- Public KeyはSupabaseの `VAPID_PUBLIC_KEY` にも設定
+- Private KeyはSupabaseの `VAPID_PRIVATE_KEY` だけへ設定
+- Private Keyを `VITE_` で始まる変数、GitHub、READMEへ絶対に保存しない
+
+Webhook用のランダムな秘密文字列も作成します。
+
+```powershell
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+表示された値を後述の `JOIN_REQUEST_WEBHOOK_SECRET` とWebhook Headerの両方へ、
+同じ文字列で設定します。
+
+### Supabase Edge Functionを公開する
+
+PowerShellで次を順番に実行します。`YOUR_PROJECT_REF` はProject URLの
+`https://` と `.supabase.co` の間の文字列です。
+
+```powershell
+npx supabase login
+npx supabase link --project-ref YOUR_PROJECT_REF
+npx supabase functions deploy send-join-request-push --no-verify-jwt
+```
+
+続いてSecretを設定します。値は自分のものへ置き換え、引用符のまま貼り付けないでください。
+
+```powershell
+npx supabase secrets set VAPID_SUBJECT=mailto:YOUR_EMAIL
+npx supabase secrets set VAPID_PUBLIC_KEY=YOUR_VAPID_PUBLIC_KEY
+npx supabase secrets set VAPID_PRIVATE_KEY=YOUR_VAPID_PRIVATE_KEY
+npx supabase secrets set APP_ORIGIN=https://mapalbum-japan-2026.vercel.app
+npx supabase secrets set JOIN_REQUEST_WEBHOOK_SECRET=YOUR_RANDOM_WEBHOOK_SECRET
+```
+
+`SUPABASE_URL` と `SUPABASE_SERVICE_ROLE_KEY` はSupabase Edge Functionへ標準で
+提供されます。これらをVercelやPWAへ設定しないでください。
+
+### Database Webhookを1つ作る
+
+1. Supabase Dashboardで `Database` → `Webhooks` を開く
+2. `Create a new hook` を押す
+3. Nameを `send-join-request-push` にする
+4. Tableを `public.album_join_requests` にする
+5. Eventsは `Insert` だけをONにする
+6. Typeは `Supabase Edge Functions` を選ぶ
+7. Functionは `send-join-request-push` を選ぶ
+8. HTTP Headerを追加する
+9. Header名を `x-mapalbum-webhook-secret` にする
+10. 値を `JOIN_REQUEST_WEBHOOK_SECRET` と同じ文字列にする
+11. 保存する
+
+Edge FunctionはWebhookの秘密文字列を検証し、対象アルバムのowner／adminだけを
+サーバー側で検索します。Service Role Keyはサーバー内だけで使われ、ブラウザーへ
+送信されません。無効になったPush購読は404／410応答時に自動削除されます。
+
+### VercelへPushのPublic Keyを設定する
+
+1. VercelでMapAlbum Projectを開く
+2. `Settings` → `Environment Variables` を開く
+3. Nameへ `VITE_VAPID_PUBLIC_KEY` を入力
+4. ValueへVAPIDのPublic Keyを入力
+5. Production、Preview、Developmentを選択
+6. `Save` を押す
+7. `Deployments` → 最新Deploymentの `…` → `Redeploy` を押す
+
+Viteの環境変数はビルド時に入るため、保存しただけでは既存Deploymentへ反映されません。
+
+### iPhoneで通知をONにする
+
+1. iPhoneのSafariで `https://mapalbum-japan-2026.vercel.app` を開く
+2. Safariの共有ボタンを押す
+3. `ホーム画面に追加` を押す
+4. ホーム画面のMapAlbumアイコンから起動する
+5. ログインする
+6. 右上のプロフィールを押して設定を開く
+7. `参加申請の通知を受け取る` をONにする
+8. iPhoneの確認画面で `許可` を押す
+
+通知許可はこのスイッチをONにした時だけ要求されます。SafariタブでPushを利用できない
+場合でも、アプリを開いている間のRealtimeポップアップは必ず動作します。通知をタップ
+すると、対象アルバムの申請管理画面を開きます。ログアウト時は端末購読を解除し、
+Supabaseの購読行も削除します。
+
+### 申請者側の操作
+
+1. オーナーから招待URL、QR、または招待コードを受け取る
+2. MapAlbumへログインし、メール認証を完了する
+3. URL／QRなら開いた後、招待コードなら `アルバム` → `招待コードで申請` を開く
+4. `参加を申請` を押す
+5. `参加申請を送りました。オーナーの承認をお待ちください` を確認する
+6. 承認後はRealtimeでアルバム一覧へ即時追加される
+
+同じユーザーが同じアルバムへ複数のpending申請を作ることは、Unique IndexとRPCの
+両方で防止しています。拒否された場合はアルバムへ参加しません。
+
+### オーナー／管理者の承認方法
+
+1. 新規申請のポップアップで `申請を見る` を押す
+2. または右上の赤い件数バッジ付き人＋を押す
+3. 共有画面の最上部にある `参加申請 〇件` を押す
+4. 表示名、メール、申請日時、対象アルバム、希望権限を確認する
+5. `閲覧のみ`、`メンバー`、`管理者` から承認後の権限を選ぶ
+6. `承認` または `拒否` を押す
+
+承認RPCは対象申請を行ロックし、pendingであることを再確認してから
+`album_members` 追加とstatus更新を同じトランザクションで実行します。
+連打や別端末からの二重承認でも二重登録されません。
+
+### 近くの人を探す方法
+
+1. 2人とも別アカウントでログインする
+2. 2人ともアプリを前面で開く
+3. 2人とも設定の `近くの人を探す` をONにする
+4. 位置情報を許可する
+5. 最後の更新から5分以内、100m以内なら `近くに〇〇さんがいます` と表示される
+6. 招待する側がアルバムを選び、`このアルバムへ招待` を押す
+7. 相手が `受け取る` を押す
+8. オーナー／管理者が通常の参加申請を承認する
+
+Presenceへ送るのは、丸めた座標、user ID、表示名、更新時刻だけです。緯度経度を
+アプリDBへ保存せず、相手画面へ座標や距離を表示しません。OFF、ログアウト、
+ページ終了、バックグラウンド移行、Realtime切断時にPresenceから消えます。
+位置情報拒否、15秒のタイムアウト、GPS精度200m超、オフラインは画面へ理由を表示し、
+QR・URL・招待コードへ案内します。
+
+### アルバムごとの招待方法
+
+1. 招待したいアルバムを選ぶ
+2. 右上の人＋を押す
+3. 画面上部で対象アルバム名を確認する
+4. URL共有、QR、招待コード、メール招待から選ぶ
+5. オーナー／管理者は `このアルバムの招待設定` で期限を設定する
+6. 必要な場合だけ `一般メンバーの招待を許可` をONにする
+7. 漏えい時は `古いコードを無効化して再発行` を押す
+
+招待コードはDB全体でUniqueです。再発行すると同じアルバムの旧コードは即時無効に
+なります。アルバムAのコード／tokenはアルバムAのIDへサーバー側で結び付くため、
+アルバムBの参加には使えません。一般メンバーの招待許可は初期OFFで、閲覧のみの
+ユーザーは常に招待できません。
+
+### 公開前チェックリスト
+
+- [ ] 最新の `supabase/schema.sql` を全体実行した
+- [ ] `albums.owner_id` と `push_subscriptions` が存在する
+- [ ] 8つのアプリテーブルでRLSがEnabled
+- [ ] `album_join_requests` がRealtime publicationへ追加済み
+- [ ] `send-join-request-push` Edge FunctionをDeployした
+- [ ] Edge Functionへ5つのSecretを設定した
+- [ ] `album_join_requests` Insert Webhookを作成した
+- [ ] Webhook HeaderとSecretが完全一致する
+- [ ] Vercelへ `VITE_VAPID_PUBLIC_KEY` を設定してRedeployした
+- [ ] iPhoneではホーム画面のMapAlbumから通知をONにした
+- [ ] 別々の2アカウントで申請、承認、拒否を確認した
+- [ ] 100m以内／5分以内の近距離検出とOFF後の消去を確認した

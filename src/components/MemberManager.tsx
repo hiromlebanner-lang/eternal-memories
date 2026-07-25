@@ -30,10 +30,15 @@ const ROLE_LABEL: Record<AlbumRole, string> = {
 };
 
 const ASSIGNABLE_ROLES: Exclude<AlbumRole, "owner">[] = [
-  "admin",
-  "member",
   "viewer",
+  "member",
+  "admin",
 ];
+
+const REQUEST_DATE_FORMAT = new Intl.DateTimeFormat("ja-JP", {
+  dateStyle: "medium",
+  timeStyle: "short",
+});
 
 interface MemberManagerProps {
   album: Album;
@@ -190,6 +195,16 @@ export function MemberManager({
                     <span className="member-identity">
                       <strong>{applicantName}</strong>
                       <small>{request.email || "メールアドレス非公開"}</small>
+                      <small className="approval-request-meta">
+                        申請日時：
+                        {REQUEST_DATE_FORMAT.format(new Date(request.created_at))}
+                      </small>
+                      <small className="approval-request-meta">
+                        希望する権限：{ROLE_LABEL[request.requested_role]}
+                      </small>
+                      <small className="approval-request-meta">
+                        対象アルバム：{request.album_name || album.name}
+                      </small>
                     </span>
                     <label className="approval-role-field">
                       <span className="share-sr-only">
@@ -224,10 +239,10 @@ export function MemberManager({
                         className="approval-button approval-button--reject"
                         disabled={isChanging}
                         onClick={() => void review(request, false)}
-                        aria-label={`${applicantName}の参加申請を却下`}
+                        aria-label={`${applicantName}の参加申請を拒否`}
                       >
                         <X size={17} aria-hidden="true" />
-                        <span>却下</span>
+                        <span>拒否</span>
                       </button>
                       <button
                         type="button"
@@ -250,7 +265,7 @@ export function MemberManager({
         {isManager && !loading && requests.length === 0 ? (
           <p className="approval-empty" role="status">
             <Check size={16} aria-hidden="true" />
-            承認待ちの参加申請はありません
+            現在、参加申請はありません
           </p>
         ) : null}
 
