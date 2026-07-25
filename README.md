@@ -1058,8 +1058,8 @@ PWAとして使う段階ではMacやXcodeは不要です。App Storeへの最終
 
 ```text
 pnpm test
-Test Files  16 passed (16)
-Tests       72 passed (72)
+Test Files  18 passed (18)
+Tests       81 passed (81)
 
 pnpm typecheck
 TypeScript errors: 0
@@ -1231,6 +1231,17 @@ URL・QR・招待コードは引き続き利用できます。期限設定、コ
 
 ### Web Push用のVAPID鍵を作る
 
+最初にSupabase SQL Editorで、通知専用の次のMigrationを実行します。
+
+```text
+supabase/migrations/20260726_safe_join_request_push.sql
+```
+
+このファイルはトランザクション内で、`push_subscriptions`、
+`join_request_push_deliveries`、通知購読RPC、通知用RLS、参加申請のRealtime登録だけを
+追加します。`supabase/schema.sql`全体は実行しません。既存のアルバム、写真、ユーザー、
+メンバー、参加申請、Storageデータを削除・更新する処理は含みません。
+
 Windows PowerShellでプロジェクトフォルダーを開き、次を実行します。
 
 ```powershell
@@ -1293,7 +1304,8 @@ npx supabase secrets set JOIN_REQUEST_WEBHOOK_SECRET=YOUR_RANDOM_WEBHOOK_SECRET
 
 Edge FunctionはWebhookの秘密文字列を検証し、対象アルバムのowner／adminだけを
 サーバー側で検索します。Service Role Keyはサーバー内だけで使われ、ブラウザーへ
-送信されません。無効になったPush購読は404／410応答時に自動削除されます。
+送信されません。同じ申請と同じ端末の組み合わせは送信履歴で一度だけ処理されます。
+無効になったPush購読は404／410応答時に `enabled=false` へ変更されます。
 
 ### VercelへPushのPublic Keyを設定する
 
@@ -1321,7 +1333,7 @@ Viteの環境変数はビルド時に入るため、保存しただけでは既�
 通知許可はこのスイッチをONにした時だけ要求されます。SafariタブでPushを利用できない
 場合でも、アプリを開いている間のRealtimeポップアップは必ず動作します。通知をタップ
 すると、対象アルバムの申請管理画面を開きます。ログアウト時は端末購読を解除し、
-Supabaseの購読行も削除します。
+Supabaseの購読行を `enabled=false` へ変更します。
 
 ### 申請者側の操作
 

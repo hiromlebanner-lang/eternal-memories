@@ -24,10 +24,21 @@ self.addEventListener("push", (event) => {
 
 self.addEventListener("notificationclick", (event) => {
   event.notification.close();
-  const targetURL = new URL(
+  const requestedURL = new URL(
     event.notification.data?.url || "/",
     self.location.origin,
   );
+  const targetURL = new URL("/", self.location.origin);
+  const albumID = requestedURL.searchParams.get("manageJoin");
+  if (
+    requestedURL.origin === self.location.origin &&
+    albumID &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+      albumID,
+    )
+  ) {
+    targetURL.searchParams.set("manageJoin", albumID);
+  }
 
   event.waitUntil(
     self.clients

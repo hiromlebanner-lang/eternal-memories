@@ -405,7 +405,7 @@ function Dashboard({
             }」への参加申請が届きました`
           : `参加申請が${notificationRequests.length}件届いています`;
       void showJoinRequestSystemNotification({
-        title: "MapAlbumの参加申請",
+        title: "MapAlbumに参加申請が届きました",
         body,
         tag:
           notificationRequests.length === 1

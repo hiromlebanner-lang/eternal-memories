@@ -29,6 +29,31 @@ function json(body: unknown, status = 200) {
   });
 }
 
+function errorMessage(error: unknown) {
+  if (error instanceof Error) return error.message.slice(0, 500);
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message.slice(0, 500);
+  }
+  return "Push delivery failed";
+}
+
+function pushStatusCode(error: unknown) {
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "statusCode" in error
+  ) {
+    const statusCode = Number(error.statusCode);
+    return Number.isFinite(statusCode) ? statusCode : 0;
+  }
+  return 0;
+}
+
 function isAllowedPushEndpoint(endpoint: string) {
   try {
     const url = new URL(endpoint);
@@ -73,6 +98,17 @@ Deno.serve(async (request) => {
     return json({ error: "Push environment is incomplete" }, 500);
   }
 
+  let safeAppOrigin: string;
+  try {
+    const parsedOrigin = new URL(appOrigin);
+    if (parsedOrigin.protocol !== "https:") {
+      return json({ error: "APP_ORIGIN must use HTTPS" }, 500);
+    }
+    safeAppOrigin = parsedOrigin.origin;
+  } catch {
+    return json({ error: "APP_ORIGIN is invalid" }, 500);
+  }
+
   let body: WebhookBody;
   try {
     body = await request.json();
@@ -98,7 +134,11 @@ Deno.serve(async (request) => {
     { data: applicant, error: applicantError },
     { data: managers, error: managersError },
   ] = await Promise.all([
-    admin.from("albums").select("id, name").eq("id", record.album_id).single(),
+    admin
+      .from("albums")
+      .select("id, name, created_by")
+      .eq("id", record.album_id)
+      .single(),
     admin
       .from("profiles")
       .select("display_name")
@@ -123,8 +163,16 @@ Deno.serve(async (request) => {
     );
   }
 
-  const managerIDs = (managers ?? []).map((manager) => manager.user_id);
-  if (managerIDs.length === 0) return json({ delivered: 0 });
+  const managerIDs = [
+    album.created_by,
+    ...(managers ?? []).map((manager) => manager.user_id),
+  ].filter(
+    (managerID, index, allIDs): managerID is string =>
+      typeof managerID === "string" &&
+      managerID !== record.user_id &&
+      allIDs.indexOf(managerID) === index,
+  );
+  if (managerIDs.length === 0) return json({ delivered: 0, failed: 0 });
 
   const { data: subscriptions, error: subscriptionsError } = await admin
     .from("push_subscriptions")
@@ -137,24 +185,49 @@ Deno.serve(async (request) => {
 
   webpush.setVapidDetails(vapidSubject, vapidPublicKey, vapidPrivateKey);
   const applicantName = applicant?.display_name || "参加希望者";
-  const targetURL = new URL("/", appOrigin);
+  const targetURL = new URL("/", safeAppOrigin);
   targetURL.searchParams.set("manageJoin", record.album_id);
   const payload = JSON.stringify({
-    title: "MapAlbumの参加申請",
-    body: `${applicantName}さんが「${album.name}」への参加を申請しました`,
+    title: "MapAlbumに参加申請が届きました",
+    body: `${applicantName}さんが『${album.name}』への参加を申請しました`,
     tag: `join-request-${record.id}`,
     albumID: record.album_id,
     url: targetURL.toString(),
   });
 
-  const expiredIDs: string[] = [];
-  const results = await Promise.allSettled(
+  const results = await Promise.all(
     ((subscriptions ?? []) as PushSubscriptionRow[]).map(
       async (subscription) => {
-        if (!isAllowedPushEndpoint(subscription.endpoint)) {
-          expiredIDs.push(subscription.id);
-          return;
+        const { data: claimed, error: claimError } = await admin.rpc(
+          "claim_join_request_push_delivery",
+          {
+            p_request_id: record.id,
+            p_subscription_id: subscription.id,
+          },
+        );
+        if (claimError) {
+          return { status: "failed" as const };
         }
+        if (!claimed) {
+          return { status: "duplicate" as const };
+        }
+
+        if (!isAllowedPushEndpoint(subscription.endpoint)) {
+          await Promise.all([
+            admin
+              .from("push_subscriptions")
+              .update({ enabled: false })
+              .eq("id", subscription.id),
+            admin.rpc("finish_join_request_push_delivery", {
+              p_request_id: record.id,
+              p_subscription_id: subscription.id,
+              p_status: "invalid",
+              p_error: "Unsupported push endpoint",
+            }),
+          ]);
+          return { status: "invalid" as const };
+        }
+
         try {
           await webpush.sendNotification(
             {
@@ -166,27 +239,39 @@ Deno.serve(async (request) => {
             },
             payload,
           );
+          await admin.rpc("finish_join_request_push_delivery", {
+            p_request_id: record.id,
+            p_subscription_id: subscription.id,
+            p_status: "delivered",
+            p_error: "",
+          });
+          return { status: "delivered" as const };
         } catch (error) {
-          const statusCode =
-            typeof error === "object" && error !== null && "statusCode" in error
-              ? Number((error as { statusCode?: unknown }).statusCode)
-              : 0;
-          if (statusCode === 404 || statusCode === 410) {
-            expiredIDs.push(subscription.id);
-            return;
+          const statusCode = pushStatusCode(error);
+          const invalid = statusCode === 404 || statusCode === 410;
+          if (invalid) {
+            await admin
+              .from("push_subscriptions")
+              .update({ enabled: false })
+              .eq("id", subscription.id);
           }
-          throw error;
+          await admin.rpc("finish_join_request_push_delivery", {
+            p_request_id: record.id,
+            p_subscription_id: subscription.id,
+            p_status: invalid ? "invalid" : "failed",
+            p_error: errorMessage(error),
+          });
+          return { status: invalid ? ("invalid" as const) : ("failed" as const) };
         }
       },
     ),
   );
 
-  if (expiredIDs.length > 0) {
-    await admin.from("push_subscriptions").delete().in("id", expiredIDs);
-  }
-  const delivered = results.filter(
-    (result) => result.status === "fulfilled",
-  ).length;
-  const failed = results.length - delivered;
-  return json({ delivered, failed, removed: expiredIDs.length });
+  return json({
+    delivered: results.filter((result) => result.status === "delivered").length,
+    failed: results.filter((result) => result.status === "failed").length,
+    disabled: results.filter((result) => result.status === "invalid").length,
+    duplicates: results.filter((result) => result.status === "duplicate")
+      .length,
+  });
 });
