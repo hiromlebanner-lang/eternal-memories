@@ -186,7 +186,26 @@ npm run dev
 
 `Supabaseが未設定です` という赤い警告が消えれば、URLとKeyの読み込みは成功です。
 
-### 2-4. SQLを実行してデータベースを作成
+### 2-4. SQLを実行してデータベースを作成／更新
+
+> **重要：使用中のSupabaseでは `supabase/schema.sql` を再実行しないでください。**
+>
+> アルバム、写真、ユーザー、メンバーがすでに存在する環境では、今回追加した
+> 機能だけを反映する
+> `supabase/migrations/20260725_safe_invite_notifications.sql` を使用します。
+> このmigrationは既存行を更新せず、トランザクション途中の失敗時は全体を
+> ロールバックします。実行前・実行後の確認SQLも同じファイルに含まれます。
+>
+> `supabase/schema.sql` を使うのは、データが1件もない新規プロジェクトを
+> 最初から構築する場合だけです。
+
+既存環境用migrationをWindowsでクリップボードへコピーする場合:
+
+```powershell
+Get-Content .\supabase\migrations\20260725_safe_invite_notifications.sql -Raw | Set-Clipboard
+```
+
+#### 新規で空のSupabaseプロジェクトを作る場合だけ
 
 1. Supabase左メニューの `SQL Editor` を開く
 2. `New query` を押す
@@ -228,7 +247,8 @@ SQL Editorへ戻り、`Ctrl + V` で貼り付けます。
 
 SQL実行後、左メニューの `Table Editor` を開き、上の8テーブルが表示されることを確認します。手動でテーブルや「全員許可」ポリシーを追加する必要はありません。
 
-SQLは更新時に再実行できますが、本番データがある場合は先にバックアップを取得してください。既存の招待コードは維持され、旧 `editor` 権限は `member`、各アルバム作成者は `owner` へ移行されます。
+本番データがある環境の更新には、必ず目的別のmigrationを使用してください。
+`supabase/schema.sql` 全体の再実行は行いません。
 
 ### 2-5. メール認証を設定
 
@@ -491,7 +511,10 @@ RLSのスイッチをONにするだけではデータへアクセスできませ
    - owner／admin／memberの投稿
    - 投稿者本人またはowner／adminの削除
 
-Bucketが見つからない場合は、Storage画面から別名で作らず `supabase/schema.sql` 全体を再実行してください。名前は必ず小文字の `album-photos` です。PublicをONにするとURLを知る未ログイン利用者が写真へアクセスできるため、ONにしないでください。
+Bucketが見つからない場合でも、既存データがある環境で
+`supabase/schema.sql` を再実行しないでください。まずバックアップと現在の
+Storage Policyを確認し、名前が小文字の `album-photos`、PublicがOFFのPrivate
+Bucketを個別に用意します。今回の安全migrationは既存Storageへ一切触れません。
 
 SQL Editorで次を実行すると、RLSとStorage設定を確認できます。
 
@@ -549,7 +572,9 @@ order by policyname;
 - 3つ目: `album-photos` が1行、`public` が `false`
 - 4つ目: MapAlbum用Storage Policyが3件
 
-どれかが不足している場合は、そのまま公開せず `supabase/schema.sql` 全体を再実行し、SQL Editorの最初のエラーを確認してください。
+どれかが不足している場合はそのまま公開しません。空の新規環境だけは
+`supabase/schema.sql` の最初のエラーを確認し、既存環境では目的別migrationの
+実行結果と実行後確認SQLを確認してください。
 
 確認後、次のテストを行ってください。
 
@@ -587,7 +612,9 @@ order by policyname;
 
 #### SQL・RLS・Storage
 
-- [ ] `supabase/schema.sql` の一部ではなくファイル全体を実行した
+- [ ] 空の新規環境では `supabase/schema.sql` 全体を1回実行した
+- [ ] 既存環境では
+      `supabase/migrations/20260725_safe_invite_notifications.sql` を使用した
 - [ ] `profiles`、`albums`、`album_members`、`photos`、`album_invitations`、`album_join_requests`、`nearby_invitations`、`push_subscriptions` が存在する
 - [ ] 8テーブルすべてでRLSがEnabled
 - [ ] Policyが `authenticated` とアルバム権限を検証している
@@ -1070,7 +1097,10 @@ Console warnings: 0
 | 11 | 権限別制限 | 合格 | 4アカウント実接続は要確認 | owner／admin／member／viewerのUI判定、RLS、RPC、Storage policy |
 | 12 | 未ログインで非表示 | 合格 | Supabase REST直アクセスは要確認 | クライアント非表示、全8テーブルRLS、anon権限取消、Private bucket |
 
-`実Supabase・実機E2E` が「要確認」の項目は失敗ではなく、現在の公開環境に `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` が未設定で、実メールアドレス、実データベース、iPhoneのカメラ／GPSへ接続できないため未実施です。実サービスを有効にする前に、このREADMEのSupabase設定手順に従って `supabase/schema.sql` の最新版を適用し、環境変数を設定してください。
+`実Supabase・実機E2E` が「要確認」の項目は、実メールアドレス、実データベース、
+iPhoneのカメラ／GPSを使う確認が必要な項目です。既存環境では
+`supabase/migrations/20260725_safe_invite_notifications.sql` を適用し、
+環境変数を設定してから確認してください。
 
 ### 今回修正した不具合
 
@@ -1093,7 +1123,8 @@ Console warnings: 0
 
 ### 実環境での最終E2E手順
 
-1. Supabase SQL Editorで最新版の `supabase/schema.sql` を実行する
+1. 既存環境ではSQL Editorで
+   `supabase/migrations/20260725_safe_invite_notifications.sql` を実行する
 2. Confirm emailを有効にし、公開URLとローカルURLをRedirect URLsへ登録する
 3. 公開環境へ `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` を設定する
 
@@ -1121,8 +1152,9 @@ Presenceへ送る値は、緯度・経度を小数4桁相当の整数へ丸め�
 
 ### Supabaseへ追加設定を反映する
 
-この機能を使う前に、Supabase Dashboardの `SQL Editor` で最新版の
-`supabase/schema.sql` を全体実行してください。次の設定が追加されます。
+この機能を既存環境へ追加する場合は、Supabase Dashboardの `SQL Editor` で
+`supabase/migrations/20260725_safe_invite_notifications.sql` を
+実行してください。次の設定が追加されます。
 
 - `nearby_invitations` テーブルとRLS
 - 近距離招待の作成・受諾・辞退RPC
@@ -1163,10 +1195,12 @@ SafariまたはMapAlbumの許可を変更してください。
 ## 参加申請・Push通知・アルバム別招待の最終設定
 
 この章は、参加申請のアプリ内通知だけでなく、ホーム画面へ追加したPWAへの
-Web Push通知まで有効にするための手順です。先に `supabase/schema.sql` の
-最新版をSQL Editorで全体実行してください。これにより次が追加・更新されます。
+Web Push通知まで有効にするための手順です。既存環境では先に
+`supabase/migrations/20260725_safe_invite_notifications.sql` を
+SQL Editorで実行してください。これにより次が追加・更新されます。
 
-- `albums.owner_id`。既存アルバムは `created_by` から安全に移行
+- `albums.owner_id`。既存行は変更せず、権限判定では従来の
+  `created_by` も引き続きオーナーとして扱う
 - アルバム別の招待コード、有効／無効、有効期限、一般メンバーの招待許可
 - ユーザー別のPrivateな `push_subscriptions`
 - 参加申請を一度だけ承認するトランザクションRPC
@@ -1339,7 +1373,8 @@ QR・URL・招待コードへ案内します。
 
 ### 公開前チェックリスト
 
-- [ ] 最新の `supabase/schema.sql` を全体実行した
+- [ ] 既存環境では
+      `supabase/migrations/20260725_safe_invite_notifications.sql` を実行した
 - [ ] `albums.owner_id` と `push_subscriptions` が存在する
 - [ ] 8つのアプリテーブルでRLSがEnabled
 - [ ] `album_join_requests` がRealtime publicationへ追加済み
