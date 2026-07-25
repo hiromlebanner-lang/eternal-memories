@@ -39,12 +39,14 @@ interface MemberManagerProps {
   album: Album;
   currentUser: AppUser;
   onClose: () => void;
+  onChanged?: () => void | Promise<void>;
 }
 
 export function MemberManager({
   album,
   currentUser,
   onClose,
+  onChanged,
 }: MemberManagerProps) {
   const [members, setMembers] = useState<AlbumMember[]>([]);
   const [requests, setRequests] = useState<AlbumJoinRequest[]>([]);
@@ -101,6 +103,7 @@ export function MemberManager({
           candidate.user_id === member.user_id ? { ...candidate, role } : candidate,
         ),
       );
+      await onChanged?.();
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -124,6 +127,7 @@ export function MemberManager({
         requestRoles[request.id] ?? request.requested_role,
       );
       await refresh();
+      await onChanged?.();
     } catch (caught) {
       setError(
         caught instanceof Error

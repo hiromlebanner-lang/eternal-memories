@@ -66,6 +66,7 @@ function Recenter({ latitude, longitude }: { latitude: number; longitude: number
 export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
   const cameraInput = useRef<HTMLInputElement>(null);
   const libraryInput = useRef<HTMLInputElement>(null);
+  const selectionRequest = useRef(0);
 
   const [file, setFile] = useState<File>();
   const [previewURL, setPreviewURL] = useState(photo?.image_url ?? "");
@@ -100,28 +101,35 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
 
   const chooseFile = async (selected?: File) => {
     if (!selected) return;
+    const requestID = ++selectionRequest.current;
     setError("");
     setFile(selected);
     if (previewURL.startsWith("blob:")) URL.revokeObjectURL(previewURL);
     setPreviewURL(URL.createObjectURL(selected));
-
-    const metadata = await readPhotoMetadata(selected);
-    if (metadata.capturedAt) setCapturedAt(toInputDate(metadata.capturedAt));
-    if (metadata.latitude != null && metadata.longitude != null) {
-      setLatitude(metadata.latitude);
-      setLongitude(metadata.longitude);
-      return;
-    }
-
+    setCapturedAt(toInputDate(new Date()));
+    setLatitude(null);
+    setLongitude(null);
     setLocating(true);
+
     try {
+      const metadata = await readPhotoMetadata(selected);
+      if (requestID !== selectionRequest.current) return;
+      if (metadata.capturedAt) setCapturedAt(toInputDate(metadata.capturedAt));
+      if (metadata.latitude != null && metadata.longitude != null) {
+        setLatitude(metadata.latitude);
+        setLongitude(metadata.longitude);
+        return;
+      }
+
       const position = await getCurrentPosition();
+      if (requestID !== selectionRequest.current) return;
       setLatitude(position.latitude);
       setLongitude(position.longitude);
     } catch (caught) {
+      if (requestID !== selectionRequest.current) return;
       setError(caught instanceof Error ? caught.message : "位置情報を取得できません。");
     } finally {
-      setLocating(false);
+      if (requestID === selectionRequest.current) setLocating(false);
     }
   };
 
@@ -147,6 +155,17 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
     }
     if (latitude == null || longitude == null) {
       setError("撮影場所を取得または地図で指定してください。");
+      return;
+    }
+    if (
+      !Number.isFinite(latitude) ||
+      !Number.isFinite(longitude) ||
+      latitude < -90 ||
+      latitude > 90 ||
+      longitude < -180 ||
+      longitude > 180
+    ) {
+      setError("撮影場所の緯度・経度が正しくありません。");
       return;
     }
 

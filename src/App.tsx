@@ -30,13 +30,22 @@ import {
   clearPrivateOfflineData,
   createAlbum,
   deletePhoto,
+  loadAlbumInviteCode,
   loadAlbums,
+  loadMyPendingJoinRequests,
   loadPhotos,
   requestAlbumMembership,
   updatePhoto,
   uploadPhoto,
 } from "./lib/data";
+import {
+  canDeletePhoto,
+  canEditPhoto,
+  canManageAlbum,
+  canPostPhoto,
+} from "./lib/permissions";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
+import { CATEGORY_META } from "./types";
 import type {
   Album,
   AlbumPhoto,
@@ -273,16 +282,22 @@ function Dashboard({
   const [detailPhotos, setDetailPhotos] = useState<AlbumPhoto[]>([]);
   const [detailPhotoID, setDetailPhotoID] = useState<string>();
   const [showsShare, setShowsShare] = useState(false);
+  const [sharingAlbum, setSharingAlbum] = useState<Album>();
   const [showsMembers, setShowsMembers] = useState(false);
   const [showsSettings, setShowsSettings] = useState(false);
+  const [pendingJoinCount, setPendingJoinCount] = useState(0);
   const inviteHandled = useRef(false);
 
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumID);
 
   const refreshAlbums = useCallback(async () => {
     try {
-      const result = await loadAlbums(user.id);
+      const [result, pendingRequests] = await Promise.all([
+        loadAlbums(user.id),
+        loadMyPendingJoinRequests(user.id),
+      ]);
       setAlbums(result.data);
+      setPendingJoinCount(pendingRequests.length);
       setUsingCache(result.fromCache);
       setSelectedAlbumID((current) =>
         result.data.some((album) => album.id === current)
@@ -334,6 +349,7 @@ function Dashboard({
           inviteCode: inviteCode ?? undefined,
           inviteToken: inviteToken ?? undefined,
         });
+        setPendingJoinCount((current) => current + 1);
         setToast("参加申請を送りました。承認後にアルバムが表示されます");
         const url = new URL(window.location.href);
         url.searchParams.delete("join");
@@ -383,6 +399,37 @@ function Dashboard({
   }, [refreshPhotos, selectedAlbumID]);
 
   useEffect(() => {
+    if (!supabase) return;
+    const client = supabase;
+    const membershipChannel = client
+      .channel(`memberships:${user.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "album_members",
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => void refreshAlbums(),
+      )
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "album_join_requests",
+          filter: `user_id=eq.${user.id}`,
+        },
+        () => void refreshAlbums(),
+      )
+      .subscribe();
+    return () => {
+      void client.removeChannel(membershipChannel);
+    };
+  }, [refreshAlbums, user.id]);
+
+  useEffect(() => {
     if (!toast) return;
     const timer = window.setTimeout(() => setToast(""), 3600);
     return () => window.clearTimeout(timer);
@@ -392,25 +439,18 @@ function Dashboard({
     const query = search.trim().toLocaleLowerCase("ja");
     if (!query) return photos;
     return photos.filter((photo) => {
-      const haystack = `${photo.caption} ${photo.author_name} ${photo.category}`.toLocaleLowerCase(
+      const haystack = `${photo.caption} ${photo.author_name} ${photo.category} ${CATEGORY_META[photo.category].label}`.toLocaleLowerCase(
         "ja",
       );
       return haystack.includes(query);
     });
   }, [photos, search]);
 
-  const canPost =
-    selectedAlbum?.role === "owner" ||
-    selectedAlbum?.role === "admin" ||
-    selectedAlbum?.role === "member";
+  const canPost = canPostPhoto(selectedAlbum?.role);
   const canEdit = (photo: AlbumPhoto) =>
-    selectedAlbum?.role === "owner" ||
-    selectedAlbum?.role === "admin" ||
-    (selectedAlbum?.role === "member" && photo.author_id === user.id);
+    canEditPhoto(selectedAlbum?.role, user.id, photo.author_id);
   const canDelete = (photo: AlbumPhoto) =>
-    selectedAlbum?.role === "owner" ||
-    selectedAlbum?.role === "admin" ||
-    photo.author_id === user.id;
+    canDeletePhoto(selectedAlbum?.role, user.id, photo.author_id);
 
   const openPhoto = (photo: AlbumPhoto) => {
     setDetailPhotos([photo]);
@@ -464,11 +504,15 @@ function Dashboard({
   };
 
   const removePhoto = async (photo: AlbumPhoto) => {
-    await deletePhoto(photo);
+    const result = await deletePhoto(photo);
     await refreshPhotos();
     await refreshAlbums();
     setDetailPhotos((current) => current.filter((candidate) => candidate.id !== photo.id));
-    setToast("写真を削除しました");
+    setToast(
+      result.storageRemoved
+        ? "写真を削除しました"
+        : "写真を削除しました。画像ファイルの後処理は再試行が必要です",
+    );
   };
 
   const addAlbum = async (name: string, description: string) => {
@@ -480,7 +524,21 @@ function Dashboard({
 
   const enterAlbum = async (code: string) => {
     await requestAlbumMembership({ inviteCode: code });
+    setPendingJoinCount((current) => current + 1);
     setToast("参加申請を送りました。承認後にアルバムが表示されます");
+  };
+
+  const openShare = async () => {
+    if (!selectedAlbum || !canManageAlbum(selectedAlbum.role)) return;
+    try {
+      const inviteCode = await loadAlbumInviteCode(selectedAlbum.id);
+      setSharingAlbum({ ...selectedAlbum, invite_code: inviteCode });
+      setShowsShare(true);
+    } catch (caught) {
+      setToast(
+        caught instanceof Error ? caught.message : "招待情報を取得できませんでした。",
+      );
+    }
   };
 
   return (
@@ -503,8 +561,8 @@ function Dashboard({
         </button>
 
         <div className="header-actions">
-          {selectedAlbum ? (
-            <button className="icon-button" type="button" onClick={() => setShowsShare(true)} aria-label="共有">
+          {selectedAlbum && canManageAlbum(selectedAlbum.role) ? (
+            <button className="icon-button" type="button" onClick={() => void openShare()} aria-label="共有">
               <UserPlus size={20} />
             </button>
           ) : null}
@@ -531,6 +589,13 @@ function Dashboard({
             : "一部のデータを端末キャッシュから表示しています。"}
         </div>
       )}
+
+      {pendingJoinCount > 0 ? (
+        <div className="offline-banner" role="status">
+          <CircleUserRound size={15} />
+          {pendingJoinCount}件のアルバムが参加承認待ちです。
+        </div>
+      ) : null}
 
       <main className="app-main">
         {selectedAlbum ? (
@@ -696,10 +761,13 @@ function Dashboard({
         />
       ) : null}
 
-      {showsShare && selectedAlbum ? (
+      {showsShare && sharingAlbum ? (
         <ShareAlbumModal
-          album={selectedAlbum}
-          onClose={() => setShowsShare(false)}
+          album={sharingAlbum}
+          onClose={() => {
+            setShowsShare(false);
+            setSharingAlbum(undefined);
+          }}
           onNotice={setToast}
           onManageMembers={() => {
             setShowsShare(false);
@@ -713,6 +781,7 @@ function Dashboard({
           album={selectedAlbum}
           currentUser={user}
           onClose={() => setShowsMembers(false)}
+          onChanged={refreshAlbums}
         />
       ) : null}
 

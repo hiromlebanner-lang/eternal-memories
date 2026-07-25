@@ -29,18 +29,51 @@ export async function readPhotoMetadata(file: File): Promise<{
 }
 
 export async function compressPhoto(file: File): Promise<Blob> {
-  const bitmap = await createImageBitmap(file);
+  let source: CanvasImageSource;
+  let width: number;
+  let height: number;
+  let cleanup = () => {};
+
+  try {
+    if (typeof createImageBitmap !== "function") throw new Error("unsupported");
+    const bitmap = await createImageBitmap(file);
+    source = bitmap;
+    width = bitmap.width;
+    height = bitmap.height;
+    cleanup = () => bitmap.close();
+  } catch {
+    const objectURL = URL.createObjectURL(file);
+    const image = new Image();
+    image.decoding = "async";
+    image.src = objectURL;
+    try {
+      await image.decode();
+    } catch {
+      URL.revokeObjectURL(objectURL);
+      throw new Error(
+        "この写真形式を読み込めませんでした。iPhoneでは「互換性優先」で撮影するか、JPEGへ変換してお試しください。",
+      );
+    }
+    source = image;
+    width = image.naturalWidth;
+    height = image.naturalHeight;
+    cleanup = () => URL.revokeObjectURL(objectURL);
+  }
+
   const maxDimension = 1800;
-  const scale = Math.min(1, maxDimension / Math.max(bitmap.width, bitmap.height));
-  const width = Math.max(1, Math.round(bitmap.width * scale));
-  const height = Math.max(1, Math.round(bitmap.height * scale));
+  const scale = Math.min(1, maxDimension / Math.max(width, height));
+  const outputWidth = Math.max(1, Math.round(width * scale));
+  const outputHeight = Math.max(1, Math.round(height * scale));
   const canvas = document.createElement("canvas");
-  canvas.width = width;
-  canvas.height = height;
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
   const context = canvas.getContext("2d");
-  if (!context) throw new Error("写真を変換できませんでした。");
-  context.drawImage(bitmap, 0, 0, width, height);
-  bitmap.close();
+  if (!context) {
+    cleanup();
+    throw new Error("写真を変換できませんでした。");
+  }
+  context.drawImage(source, 0, 0, outputWidth, outputHeight);
+  cleanup();
 
   return new Promise((resolve, reject) => {
     canvas.toBlob(

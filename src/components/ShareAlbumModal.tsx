@@ -10,6 +10,7 @@ import {
 } from "lucide-react";
 import { useMemo, useState, type FormEvent } from "react";
 import { createEmailInvitation } from "../lib/data";
+import { buildInviteURL } from "../lib/sharing";
 import type { Album, AlbumRole } from "../types";
 import { InviteQRCode } from "./InviteQRCode";
 import { Modal } from "./Modal";
@@ -52,8 +53,7 @@ export function ShareAlbumModal({
   const [error, setError] = useState("");
   const isManager = album.role === "owner" || album.role === "admin";
   const genericInviteURL = useMemo(
-    () =>
-      `${window.location.origin}/?join=${encodeURIComponent(album.invite_code)}`,
+    () => buildInviteURL("join", album.invite_code),
     [album.invite_code],
   );
 
@@ -113,9 +113,7 @@ export function ShareAlbumModal({
         email: targetEmail,
         role,
       });
-      const link = `${window.location.origin}/?invite=${encodeURIComponent(
-        next.invitation.token,
-      )}`;
+      const link = buildInviteURL("invite", next.invitation.token);
       setResult({ link, emailSent: next.emailSent, email: targetEmail });
       setEmail("");
       onNotice(

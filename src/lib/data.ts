@@ -57,7 +57,10 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
       { data: photoRows },
       { data: memberRows },
     ] = await Promise.all([
-      client.from("albums").select("*").order("created_at", { ascending: false }),
+      client
+        .from("albums")
+        .select("id, name, description, created_by, created_at")
+        .order("created_at", { ascending: false }),
       client
         .from("album_members")
         .select("album_id, role")
@@ -92,7 +95,7 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
           id: album.id,
           name: album.name,
           description: album.description ?? "",
-          invite_code: album.invite_code,
+          invite_code: "",
           created_by: album.created_by,
           created_at: album.created_at,
           cover_url: null,
@@ -222,6 +225,18 @@ export async function createEmailInvitation(input: {
   };
 }
 
+export async function loadAlbumInviteCode(albumID: string) {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc("get_album_invite_code", {
+    p_album_id: albumID,
+  });
+  if (error) throw error;
+  if (typeof data !== "string" || !data) {
+    throw new Error("招待コードを取得できませんでした。");
+  }
+  return data;
+}
+
 export async function uploadPhoto(input: {
   albumID: string;
   authorID: string;
@@ -279,17 +294,37 @@ export async function updatePhoto(
   },
 ) {
   const client = requireSupabase();
-  const { error } = await client.from("photos").update(updates).eq("id", photoID);
+  const { data, error } = await client
+    .from("photos")
+    .update(updates)
+    .eq("id", photoID)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
+  if (!data) {
+    throw new Error("写真が見つからないか、編集する権限がありません。");
+  }
 }
 
 export async function deletePhoto(photo: AlbumPhoto) {
   const client = requireSupabase();
-  const { error } = await client.from("photos").delete().eq("id", photo.id);
+  const { data, error } = await client
+    .from("photos")
+    .delete()
+    .eq("id", photo.id)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
-  if (photo.storage_path) {
-    await client.storage.from("album-photos").remove([photo.storage_path]);
+  if (!data) {
+    throw new Error("写真が見つからないか、削除する権限がありません。");
   }
+  if (photo.storage_path) {
+    const { error: storageError } = await client.storage
+      .from("album-photos")
+      .remove([photo.storage_path]);
+    return { storageRemoved: !storageError, storageError: storageError?.message };
+  }
+  return { storageRemoved: true };
 }
 
 export async function loadMembers(albumID: string): Promise<AlbumMember[]> {
@@ -342,6 +377,22 @@ export async function loadJoinRequests(
       email: profile?.email ?? "",
     };
   });
+}
+
+export async function loadMyPendingJoinRequests(
+  userID: string,
+): Promise<AlbumJoinRequest[]> {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("album_join_requests")
+    .select(
+      "id, album_id, user_id, invitation_id, requested_role, status, created_at",
+    )
+    .eq("user_id", userID)
+    .eq("status", "pending")
+    .order("created_at");
+  if (error) throw error;
+  return (data ?? []) as AlbumJoinRequest[];
 }
 
 export async function reviewJoinRequest(

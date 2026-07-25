@@ -24,35 +24,66 @@ export function groupPhotosByLocation(
   photos: AlbumPhoto[],
   thresholdMeters = 60,
 ): PhotoLocationGroup[] {
-  const parents = photos.map((_, index) => index);
+  if (thresholdMeters <= 0) {
+    return photos.map((photo) => ({
+      id: photo.id,
+      latitude: photo.latitude,
+      longitude: photo.longitude,
+      photos: [photo],
+    }));
+  }
 
-  const find = (index: number): number => {
-    let current = index;
-    while (parents[current] !== current) current = parents[current];
-    return current;
+  type Bucket = { anchor: AlbumPhoto; photos: AlbumPhoto[] };
+  const buckets: Bucket[] = [];
+  const grid = new Map<string, number[]>();
+  const toCartesianCell = (photo: AlbumPhoto) => {
+    const latitude = (photo.latitude * Math.PI) / 180;
+    const longitude = (photo.longitude * Math.PI) / 180;
+    const radiusAtLatitude = EARTH_RADIUS_METERS * Math.cos(latitude);
+    const x = radiusAtLatitude * Math.cos(longitude);
+    const y = radiusAtLatitude * Math.sin(longitude);
+    const z = EARTH_RADIUS_METERS * Math.sin(latitude);
+    return [
+      Math.floor(x / thresholdMeters),
+      Math.floor(y / thresholdMeters),
+      Math.floor(z / thresholdMeters),
+    ] as const;
   };
+  const key = (x: number, y: number, z: number) => `${x}:${y}:${z}`;
 
-  const unite = (first: number, second: number) => {
-    const firstRoot = find(first);
-    const secondRoot = find(second);
-    if (firstRoot !== secondRoot) parents[secondRoot] = firstRoot;
-  };
+  for (const photo of photos) {
+    const [cellX, cellY, cellZ] = toCartesianCell(photo);
+    let nearestBucket = -1;
+    let nearestDistance = Number.POSITIVE_INFINITY;
 
-  photos.forEach((photo, firstIndex) => {
-    for (let secondIndex = firstIndex + 1; secondIndex < photos.length; secondIndex += 1) {
-      if (distanceInMeters(photo, photos[secondIndex]) <= thresholdMeters) {
-        unite(firstIndex, secondIndex);
+    for (let x = cellX - 1; x <= cellX + 1; x += 1) {
+      for (let y = cellY - 1; y <= cellY + 1; y += 1) {
+        for (let z = cellZ - 1; z <= cellZ + 1; z += 1) {
+          for (const bucketIndex of grid.get(key(x, y, z)) ?? []) {
+            const distance = distanceInMeters(
+              buckets[bucketIndex].anchor,
+              photo,
+            );
+            if (distance <= thresholdMeters && distance < nearestDistance) {
+              nearestBucket = bucketIndex;
+              nearestDistance = distance;
+            }
+          }
+        }
       }
     }
-  });
 
-  const buckets = new Map<number, AlbumPhoto[]>();
-  photos.forEach((photo, index) => {
-    const root = find(index);
-    buckets.set(root, [...(buckets.get(root) ?? []), photo]);
-  });
+    if (nearestBucket >= 0) {
+      buckets[nearestBucket].photos.push(photo);
+    } else {
+      const nextIndex = buckets.length;
+      buckets.push({ anchor: photo, photos: [photo] });
+      const cellKey = key(cellX, cellY, cellZ);
+      grid.set(cellKey, [...(grid.get(cellKey) ?? []), nextIndex]);
+    }
+  }
 
-  return [...buckets.values()].map((groupPhotos) => ({
+  return buckets.map(({ photos: groupPhotos }) => ({
     id: groupPhotos[0].id,
     latitude:
       groupPhotos.reduce((sum, photo) => sum + photo.latitude, 0) /

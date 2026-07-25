@@ -130,6 +130,7 @@ begin
         'current_album_role',
         'is_album_manager',
         'can_view_profile',
+        'get_album_invite_code',
         'create_album_invitation',
         'request_album_membership',
         'review_album_join_request',
@@ -300,6 +301,40 @@ drop trigger if exists photos_set_updated_at on public.photos;
 create trigger photos_set_updated_at
 before update on public.photos
 for each row execute function public.set_updated_at();
+
+create or replace function public.protect_photo_identity()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  profile_name text;
+  expected_storage_path text;
+begin
+  if auth.uid() is null or new.author_id is distinct from auth.uid() then
+    raise exception '投稿者情報が正しくありません';
+  end if;
+
+  select profile.display_name
+    into profile_name
+  from public.profiles as profile
+  where profile.id = auth.uid();
+
+  new.author_name := coalesce(profile_name, 'メンバー');
+  expected_storage_path :=
+    new.album_id::text || '/' || new.author_id::text || '/' || new.id::text || '.jpg';
+  if new.storage_path is distinct from expected_storage_path then
+    raise exception '写真の保存先が正しくありません';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists photos_protect_identity on public.photos;
+create trigger photos_protect_identity
+before insert on public.photos
+for each row execute function public.protect_photo_identity();
 
 create or replace function public.protect_album_identity()
 returns trigger
@@ -561,6 +596,34 @@ begin
 end;
 $$;
 
+create or replace function public.get_album_invite_code(p_album_id uuid)
+returns text
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  result text;
+begin
+  if auth.uid() is null then
+    raise exception 'ログインが必要です';
+  end if;
+  if not public.is_album_manager(p_album_id) then
+    raise exception '招待情報を表示する権限がありません';
+  end if;
+
+  select album.invite_code
+    into result
+  from public.albums as album
+  where album.id = p_album_id;
+  if result is null then
+    raise exception 'アルバムが見つかりません';
+  end if;
+  return result;
+end;
+$$;
+
 create or replace function public.request_album_membership(
   p_invite_code text default null,
   p_invite_token uuid default null
@@ -608,6 +671,9 @@ begin
       raise exception 'メールアドレスの確認を完了してください';
     end if;
   elsif nullif(trim(p_invite_code), '') is not null then
+    if not coalesce(current_email_is_verified, false) then
+      raise exception 'メールアドレスの確認を完了してください';
+    end if;
     select album.id
       into target_album_id
     from public.albums as album
@@ -662,6 +728,13 @@ begin
   limit 1;
 
   if existing_request_id is not null then
+    if target_invitation_id is not null then
+      update public.album_join_requests
+      set
+        invitation_id = target_invitation_id,
+        requested_role = target_role
+      where id = existing_request_id;
+    end if;
     return existing_request_id;
   end if;
 
@@ -720,6 +793,17 @@ begin
   end if;
 
   if p_approve then
+    if target_request.invitation_id is not null and not exists (
+      select 1
+      from public.album_invitations as invitation
+      where invitation.id = target_request.invitation_id
+        and invitation.album_id = target_request.album_id
+        and invitation.status = 'pending'
+        and invitation.expires_at > now()
+    ) then
+      raise exception '招待URLが無効か、有効期限が切れています';
+    end if;
+
     insert into public.album_members (album_id, user_id, role)
     values (target_request.album_id, target_request.user_id, approved_role)
     on conflict (album_id, user_id) do nothing;
@@ -811,12 +895,14 @@ drop function if exists public.join_album_by_code(text);
 revoke all on function public.set_updated_at() from public;
 revoke all on function public.protect_album_identity() from public;
 revoke all on function public.protect_album_owner() from public;
+revoke all on function public.protect_photo_identity() from public;
 revoke all on function public.handle_new_user() from public;
 revoke all on function public.add_album_creator_as_owner() from public;
 revoke all on function public.is_album_member(uuid) from public;
 revoke all on function public.current_album_role(uuid) from public;
 revoke all on function public.is_album_manager(uuid) from public;
 revoke all on function public.can_view_profile(uuid) from public;
+revoke all on function public.get_album_invite_code(uuid) from public;
 revoke all on function public.create_album_invitation(
   uuid, text, public.album_role_v2
 ) from public;
@@ -833,6 +919,7 @@ grant execute on function public.is_album_member(uuid) to authenticated;
 grant execute on function public.current_album_role(uuid) to authenticated;
 grant execute on function public.is_album_manager(uuid) to authenticated;
 grant execute on function public.can_view_profile(uuid) to authenticated;
+grant execute on function public.get_album_invite_code(uuid) to authenticated;
 grant execute on function public.create_album_invitation(
   uuid, text, public.album_role_v2
 ) to authenticated;
@@ -873,7 +960,9 @@ revoke all on table public.album_join_requests from authenticated;
 grant select on table public.profiles to authenticated;
 grant update (display_name, avatar_url)
   on table public.profiles to authenticated;
-grant select, delete on table public.albums to authenticated;
+grant select (id, name, description, created_by, created_at)
+  on table public.albums to authenticated;
+grant delete on table public.albums to authenticated;
 grant insert (name, description)
   on table public.albums to authenticated;
 grant update (name, description)
@@ -1156,13 +1245,19 @@ using (
 do $$
 begin
   if not exists (
-    select 1
-    from pg_publication_tables
+    select 1 from pg_publication_tables
     where pubname = 'supabase_realtime'
-      and schemaname = 'public'
-      and tablename = 'photos'
-  ) then
-    alter publication supabase_realtime add table public.photos;
-  end if;
+      and schemaname = 'public' and tablename = 'photos'
+  ) then alter publication supabase_realtime add table public.photos; end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public' and tablename = 'album_members'
+  ) then alter publication supabase_realtime add table public.album_members; end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public' and tablename = 'album_join_requests'
+  ) then alter publication supabase_realtime add table public.album_join_requests; end if;
 end
 $$;

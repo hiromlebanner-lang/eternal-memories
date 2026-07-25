@@ -569,3 +569,69 @@ PWAとして使う段階ではMacやXcodeは不要です。App Storeへの最終
 - 不要になったメンバーはアルバムから削除する
 - 正確な緯度経度がメンバーへ共有されることを利用者へ説明する
 - Supabase Dashboardから定期的にデータベースのバックアップ設定を確認する
+
+---
+
+## テスト結果（2026年7月25日）
+
+今回の確認では、ローカルの自動テスト、RLS／Storage SQLの静的検査、Production Build、ローカルProduction Previewの画面操作を実施しました。
+
+### 実行結果
+
+```text
+pnpm test
+Test Files  9 passed (9)
+Tests       28 passed (28)
+
+pnpm typecheck
+TypeScript errors: 0
+
+pnpm build
+Build: success
+PWA service worker: generated
+```
+
+ローカルProduction Previewでは、ログイン画面、新規登録画面、Supabase未設定時の警告と認証ボタン無効化を実ブラウザーで確認しました。未ログイン状態ではアルバム、写真、地図、設定画面はDOM上にも表示されません。
+
+### 項目別結果
+
+| 順番 | テスト項目 | 自動／静的テスト | 実Supabase・実機E2E | 確認内容 |
+|---:|---|---|---|---|
+| 1 | 新規登録 | 合格 | 環境設定後に要確認 | 表示名、メール、8文字以上のパスワード、`signUp`、確認メール戻り先 |
+| 2 | メール認証 | 合格 | メール配送は要確認 | Confirm email前提、確認案内、招待URLを保ったRedirect URL |
+| 3 | ログイン | 合格 | 環境設定後に要確認 | メール＋パスワード送信、セッション確立前のデータ非表示 |
+| 4 | ログアウト | 合格 | 環境設定後に要確認 | `signOut`、PrivateなIndexedDB／写真Cache削除 |
+| 5 | パスワード再設定 | 合格 | メール配送は要確認 | 再設定メール要求、8文字以上、一致確認、更新後のローカルログアウト |
+| 6 | アルバム作成 | 合格 | DB接続後に要確認 | 前後空白除去、作成コールバック、DB triggerによる作成者のowner登録 |
+| 7 | 写真アップロード | 合格 | iPhone実機で要確認 | 写真選択、EXIF読取、GPS fallback、保存値、Private StorageとRLS |
+| 8 | 位置情報取得 | 合格 | iPhone Safariで要確認 | 高精度GPS設定、取得成功、非対応エラー、緯度経度範囲検証 |
+| 9 | 地図表示 | 合格 | 実機で最終確認推奨 | OpenStreetMap、丸い写真アイコン、カテゴリー、枚数、タップ動作 |
+| 10 | 招待URL発行 | 合格 | DB接続後に要確認 | 汎用URL、メール専用URL、QR値、サブパス維持、参加承認制 |
+| 11 | 権限別制限 | 合格 | 4アカウント実接続は要確認 | owner／admin／member／viewerのUI判定、RLS、RPC、Storage policy |
+| 12 | 未ログインで非表示 | 合格 | Supabase REST直アクセスは要確認 | クライアント非表示、全6テーブルRLS、anon権限取消、Private bucket |
+
+`実Supabase・実機E2E` が「要確認」の項目は失敗ではなく、現在の公開環境に `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` が未設定で、実メールアドレス、実データベース、iPhoneのカメラ／GPSへ接続できないため未実施です。実サービスを有効にする前に、このREADMEのSupabase設定手順に従って `supabase/schema.sql` の最新版を適用し、環境変数を設定してください。
+
+### 今回修正した不具合
+
+- 写真を選び直した際に、前の写真のEXIF位置・撮影日時が残る問題
+- 先に選んだ写真の非同期EXIF結果が、後から選んだ写真を上書きする競合
+- 60m以内の写真が鎖状に連結され、離れた地点まで1グループになる問題
+- 権限変更・参加承認が開いたままの画面へ反映されない問題
+- RLSで更新・削除が0件でも成功メッセージを表示する問題
+- member／viewerがアルバムの招待コードをDBから取得できる問題
+- 招待URLがサブパス配信で壊れる問題
+- 日本語カテゴリー名で検索できない問題
+- `createImageBitmap` が使えない写真環境に変換fallbackがない問題
+- 招待の取消／期限切れ後でも既存申請を承認できる問題
+- 写真の投稿者名とStorageパスをクライアントだけに依存していた問題
+
+### 実環境での最終E2E手順
+
+1. Supabase SQL Editorで最新版の `supabase/schema.sql` を実行する
+2. Confirm emailを有効にし、公開URLとローカルURLをRedirect URLsへ登録する
+3. 公開環境へ `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` を設定する
+4. owner、admin、member、viewer用に確認済みメールの4アカウントを用意する
+5. 上表の1から12までを順番に実行する
+6. iPhone Safariで写真撮影、GPS許可／拒否、ホーム画面起動、オフライン再表示を確認する
+7. ブラウザーのNetworkまたはSupabase RESTから、未ログイン／権限不足の直接操作が401または403になることを確認する
