@@ -76,6 +76,38 @@ export function joinRequestNotificationsEnabled() {
   );
 }
 
+async function saveJoinRequestNotificationPreference(enabled: boolean) {
+  if (!supabase) {
+    throw new Error("通知設定を保存できませんでした。");
+  }
+  const { error } = await supabase.rpc(
+    "set_join_request_notifications_enabled",
+    { p_enabled: enabled },
+  );
+  if (error) {
+    throw toAppError(error, "通知設定を保存できませんでした。");
+  }
+}
+
+export async function loadJoinRequestNotificationPreference() {
+  if (!supabase) {
+    throw new Error("通知設定を確認できませんでした");
+  }
+  const { data, error } = await supabase.rpc(
+    "get_join_request_notifications_enabled",
+  );
+  if (error) {
+    throw toAppError(error, "通知設定を確認できませんでした");
+  }
+  const enabled = data === true;
+  if (enabled && Notification.permission === "granted") {
+    localStorage.setItem(NOTIFICATION_KEY, "enabled");
+  } else {
+    localStorage.removeItem(NOTIFICATION_KEY);
+  }
+  return enabled;
+}
+
 async function removeStoredSubscription(endpoint: string) {
   if (!supabase) {
     throw new Error("Supabaseへ接続されていないため、通知購読を解除できません。");
@@ -117,6 +149,7 @@ export async function disableJoinRequestNotifications(options?: {
 export async function setJoinRequestNotificationsEnabled(enabled: boolean) {
   if (!enabled) {
     await disableJoinRequestNotifications({ unsubscribe: true });
+    await saveJoinRequestNotificationPreference(false);
     return false;
   }
 
@@ -198,6 +231,14 @@ export async function setJoinRequestNotificationsEnabled(enabled: boolean) {
       error,
       "Push通知の購読情報をSupabaseへ保存できませんでした。",
     );
+  }
+
+  try {
+    await saveJoinRequestNotificationPreference(true);
+  } catch (error) {
+    await removeStoredSubscription(endpoint).catch(() => undefined);
+    await subscription.unsubscribe().catch(() => false);
+    throw error;
   }
 
   localStorage.setItem(NOTIFICATION_KEY, "enabled");

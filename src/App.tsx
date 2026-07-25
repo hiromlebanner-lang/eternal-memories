@@ -56,9 +56,8 @@ import {
   canPostPhoto,
 } from "./lib/permissions";
 import {
-  disableJoinRequestNotifications,
   isStandalonePWA,
-  joinRequestNotificationsEnabled,
+  loadJoinRequestNotificationPreference,
   setJoinRequestNotificationsEnabled,
   showJoinRequestSystemNotification,
   supportsJoinRequestNotifications,
@@ -351,8 +350,8 @@ function Dashboard({
   const [joinRequestPopup, setJoinRequestPopup] =
     useState<AlbumJoinRequest[]>();
   const [joinNotificationsEnabled, setJoinNotificationsEnabledState] =
-    useState(joinRequestNotificationsEnabled);
-  const [notificationBusy, setNotificationBusy] = useState(false);
+    useState(false);
+  const [notificationBusy, setNotificationBusy] = useState(true);
   const [busyNearbyUserID, setBusyNearbyUserID] = useState<string>();
   const [busyNearbyInvitationID, setBusyNearbyInvitationID] =
     useState<string>();
@@ -363,6 +362,24 @@ function Dashboard({
     setUser(sessionUser);
     setProfileName(sessionUser.displayName);
   }, [sessionUser]);
+
+  useEffect(() => {
+    let active = true;
+    setNotificationBusy(true);
+    void loadJoinRequestNotificationPreference()
+      .then((enabled) => {
+        if (active) setJoinNotificationsEnabledState(enabled);
+      })
+      .catch(() => {
+        if (active) setToast("通知設定を確認できませんでした");
+      })
+      .finally(() => {
+        if (active) setNotificationBusy(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [user.id]);
 
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumID);
   const canInviteNearby = Boolean(
@@ -936,7 +953,6 @@ function Dashboard({
           : "参加申請のシステム通知をOFFにしました",
       );
     } catch (caught) {
-      setJoinNotificationsEnabledState(false);
       setToast(
         caught instanceof Error
           ? caught.message
@@ -1334,10 +1350,7 @@ function Dashboard({
               className="danger-button danger-button--wide"
               type="button"
               onClick={() => {
-                void Promise.allSettled([
-                  nearby.stopPresence(),
-                  disableJoinRequestNotifications({ unsubscribe: true }),
-                ]).finally(onSignOut);
+                void nearby.stopPresence().finally(onSignOut);
               }}
             >
               <LogOut size={18} />

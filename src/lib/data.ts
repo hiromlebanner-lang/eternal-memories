@@ -395,7 +395,15 @@ export async function uploadProfileAvatar(file: File) {
       cacheControl: "3600",
       upsert: true,
     });
-  if (uploadError) throw toAppError(uploadError, "プロフィール画像を保存できませんでした。");
+  if (uploadError) {
+    console.error("Profile avatar upload failed:", uploadError);
+    if (uploadError.message.includes("row-level security")) {
+      throw new Error(
+        "プロフィール画像を保存できませんでした。権限設定を確認してください",
+      );
+    }
+    throw toAppError(uploadError, "プロフィール画像を保存できませんでした。");
+  }
 
   const { data } = client.storage.from("avatars").getPublicUrl(path);
   const avatarURL = `${data.publicUrl}?v=${Date.now()}`;
