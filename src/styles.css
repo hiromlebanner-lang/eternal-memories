@@ -867,10 +867,35 @@ img {
   background: var(--surface-raised) !important;
 }
 
-.leaflet-control-attribution {
-  color: #646468 !important;
-  background: rgb(255 255 255 / 72%) !important;
-  font-size: 8px !important;
+.map-attribution {
+  position: absolute;
+  z-index: 500;
+  right: max(6px, env(safe-area-inset-right));
+  bottom: max(7px, env(safe-area-inset-bottom));
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: #535358;
+  background: rgb(255 255 255 / 74%);
+  font-size: 10px;
+  line-height: 1.15;
+  pointer-events: none;
+  backdrop-filter: blur(5px);
+}
+
+.map-attribution a {
+  display: inline;
+  margin: 0;
+  padding: 0;
+  color: inherit;
+  pointer-events: auto;
+  text-decoration: underline;
+  text-decoration-thickness: 0.6px;
+  text-underline-offset: 1px;
+}
+
+:root[data-theme="dark"] .map-attribution {
+  color: #e8e8eb;
+  background: rgb(29 29 31 / 72%);
 }
 
 .photo-div-icon,
@@ -2104,6 +2129,148 @@ img {
 .settings-row small {
   color: var(--text-secondary);
   font-size: 9px;
+}
+
+.nearby-settings {
+  display: grid;
+  gap: 8px;
+}
+
+.nearby-panel {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 15px;
+  background: var(--surface-muted);
+}
+
+.nearby-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--text-secondary);
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.nearby-status__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #a8a8ad;
+}
+
+.nearby-status__dot.is-online {
+  background: #43b86b;
+  box-shadow: 0 0 0 4px rgb(67 184 107 / 14%);
+}
+
+.nearby-list {
+  display: grid;
+  gap: 7px;
+}
+
+.nearby-person,
+.nearby-invitation {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 9px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  background: var(--surface-raised);
+}
+
+.nearby-person__avatar {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 50%;
+  color: white;
+  background: linear-gradient(135deg, var(--accent), var(--ocean));
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.nearby-person > span:nth-child(2),
+.nearby-invitation > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.nearby-person strong,
+.nearby-invitation strong {
+  font-size: 11px;
+}
+
+.nearby-person small,
+.nearby-invitation small {
+  overflow: hidden;
+  color: var(--text-secondary);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.nearby-person button,
+.nearby-invitation__actions button,
+.nearby-fallback button {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 9px;
+  color: var(--accent-strong);
+  background: var(--accent-soft);
+  cursor: pointer;
+  font-size: 9px;
+  font-weight: 800;
+}
+
+.nearby-invitation {
+  grid-template-columns: auto minmax(0, 1fr);
+  border-color: color-mix(in srgb, var(--accent) 32%, var(--line));
+}
+
+.nearby-invitation__actions {
+  display: flex !important;
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+}
+
+.nearby-invitation__actions button:last-child {
+  color: var(--text-secondary);
+  background: var(--surface-muted);
+}
+
+.nearby-empty,
+.nearby-privacy,
+.nearby-fallback p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.nearby-fallback {
+  display: grid;
+  justify-items: start;
+  gap: 7px;
+  padding: 9px;
+  border-radius: 12px;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 9%, transparent);
+}
+
+.nearby-privacy {
+  padding: 0 9px 5px;
 }
 
 .toggle {

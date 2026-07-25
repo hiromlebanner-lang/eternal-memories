@@ -10,6 +10,7 @@ import {
 import type { AlbumPhoto, PhotoLocationGroup } from "../types";
 import { CATEGORY_META } from "../types";
 import { groupPhotosByLocation } from "../lib/location";
+import { MapAttribution } from "./MapAttribution";
 
 interface MapPanelProps {
   photos: AlbumPhoto[];
@@ -73,15 +74,15 @@ export function MapPanel({ photos, onSelect }: MapPanelProps) {
         center={[36.3, 138.2]}
         zoom={5}
         zoomControl={false}
+        attributionControl={false}
         className="map-canvas"
         preferCanvas
       >
         <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           maxZoom={18}
         />
-        <ZoomControl position="bottomright" />
+        <ZoomControl position="topright" />
         <FitPhotos groups={groups} />
         {groups.map((group) => (
           <Marker
@@ -92,6 +93,7 @@ export function MapPanel({ photos, onSelect }: MapPanelProps) {
           />
         ))}
       </MapContainer>
+      <MapAttribution />
 
       <div className="map-summary glass-chip">
         <span className="live-dot" />

@@ -11,6 +11,7 @@ const tables = [
   "photos",
   "album_invitations",
   "album_join_requests",
+  "nearby_invitations",
 ];
 
 describe("Supabase RLS・未ログイン遮断", () => {
@@ -59,5 +60,32 @@ describe("Supabase RLS・未ログイン遮断", () => {
     expect(schema).toContain("new.author_id is distinct from auth.uid()");
     expect(schema).toContain("new.author_name := coalesce(profile_name");
     expect(schema).toContain("expected_storage_path");
+  });
+
+  it("近距離Presenceをログイン済みユーザーだけに限定する", () => {
+    expect(schema).toContain(
+      'create policy "authenticated users read nearby presence"',
+    );
+    expect(schema).toContain(
+      'create policy "authenticated users send nearby presence"',
+    );
+    expect(schema).toMatch(
+      /on realtime\.messages for select[\s\S]*to authenticated[\s\S]*realtime\.topic\(\) = 'nearby-users'/,
+    );
+    expect(schema).toMatch(
+      /on realtime\.messages for insert[\s\S]*to authenticated[\s\S]*realtime\.topic\(\) = 'nearby-users'/,
+    );
+  });
+
+  it("近距離招待は対象本人の受諾後に通常の参加申請を作成する", () => {
+    expect(schema).toContain(
+      "create or replace function public.respond_nearby_invitation",
+    );
+    expect(schema).toMatch(
+      /respond_nearby_invitation[\s\S]*invited_user_id = auth\.uid\(\)[\s\S]*insert into public\.album_join_requests/,
+    );
+    expect(schema).toMatch(
+      /create table if not exists public\.nearby_invitations[\s\S]*expires_at timestamptz not null default \(now\(\) \+ interval '5 minutes'\)/,
+    );
   });
 });

@@ -22,6 +22,7 @@ import { AuthScreen } from "./components/AuthScreen";
 import { MapPanel } from "./components/MapPanel";
 import { MemberManager } from "./components/MemberManager";
 import { Modal } from "./components/Modal";
+import { NearbyPeopleSettings } from "./components/NearbyPeopleSettings";
 import { PhotoDetail } from "./components/PhotoDetail";
 import { PhotoEditor } from "./components/PhotoEditor";
 import { PhotoGrid } from "./components/PhotoGrid";
@@ -44,12 +45,19 @@ import {
   canManageAlbum,
   canPostPhoto,
 } from "./lib/permissions";
+import {
+  createNearbyInvitation,
+  respondToNearbyInvitation,
+  useNearbyPeople,
+} from "./lib/nearby";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import { CATEGORY_META } from "./types";
 import type {
   Album,
   AlbumPhoto,
   AppUser,
+  NearbyInvitation,
+  NearbyUser,
   PhotoCategory,
   PhotoLocationGroup,
 } from "./types";
@@ -286,9 +294,20 @@ function Dashboard({
   const [showsMembers, setShowsMembers] = useState(false);
   const [showsSettings, setShowsSettings] = useState(false);
   const [pendingJoinCount, setPendingJoinCount] = useState(0);
+  const [busyNearbyUserID, setBusyNearbyUserID] = useState<string>();
+  const [busyNearbyInvitationID, setBusyNearbyInvitationID] =
+    useState<string>();
   const inviteHandled = useRef(false);
 
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumID);
+  const canInviteNearby = Boolean(
+    selectedAlbum && canManageAlbum(selectedAlbum.role),
+  );
+  const nearby = useNearbyPeople({
+    user,
+    selectedAlbumID: selectedAlbum?.id,
+    canInvite: canInviteNearby,
+  });
 
   const refreshAlbums = useCallback(async () => {
     try {
@@ -538,6 +557,52 @@ function Dashboard({
       setToast(
         caught instanceof Error ? caught.message : "招待情報を取得できませんでした。",
       );
+    }
+  };
+
+  const inviteNearbyUser = async (candidate: NearbyUser) => {
+    if (!selectedAlbum || !canInviteNearby) return;
+    setBusyNearbyUserID(candidate.id);
+    try {
+      await createNearbyInvitation(selectedAlbum.id, candidate.id);
+      setToast(
+        `${candidate.displayName}さんへ招待を送りました。相手が受け取ると参加申請になります`,
+      );
+    } catch (caught) {
+      setToast(
+        caught instanceof Error
+          ? caught.message
+          : "近くの人へ招待を送れませんでした。",
+      );
+    } finally {
+      setBusyNearbyUserID(undefined);
+    }
+  };
+
+  const respondNearbyInvitation = async (
+    invitation: NearbyInvitation,
+    accept: boolean,
+  ) => {
+    setBusyNearbyInvitationID(invitation.id);
+    try {
+      await respondToNearbyInvitation(invitation.id, accept);
+      await nearby.refreshIncomingInvitations();
+      if (accept) {
+        setPendingJoinCount((current) => current + 1);
+        setToast(
+          "参加申請を送りました。オーナーまたは管理者の承認後に参加できます",
+        );
+      } else {
+        setToast("招待を辞退しました");
+      }
+    } catch (caught) {
+      setToast(
+        caught instanceof Error
+          ? caught.message
+          : "近くの人からの招待を処理できませんでした。",
+      );
+    } finally {
+      setBusyNearbyInvitationID(undefined);
     }
   };
 
@@ -816,6 +881,26 @@ function Dashboard({
                 <small>一度表示した地図と写真を自動保存</small>
               </span>
             </div>
+            <NearbyPeopleSettings
+              enabled={nearby.enabled}
+              status={nearby.status}
+              error={nearby.error}
+              album={selectedAlbum}
+              canInvite={canInviteNearby}
+              nearbyUsers={nearby.nearbyUsers}
+              incomingInvitations={nearby.incomingInvitations}
+              busyUserID={busyNearbyUserID}
+              busyInvitationID={busyNearbyInvitationID}
+              onToggle={nearby.setNearbyEnabled}
+              onInvite={(candidate) => void inviteNearbyUser(candidate)}
+              onRespond={(invitation, accept) =>
+                void respondNearbyInvitation(invitation, accept)
+              }
+              onOpenStandardInvite={() => {
+                setShowsSettings(false);
+                void openShare();
+              }}
+            />
             <div className="install-note">
               <CircleUserRound size={20} />
               <p>
@@ -826,7 +911,9 @@ function Dashboard({
             <button
               className="danger-button danger-button--wide"
               type="button"
-              onClick={() => void onSignOut()}
+              onClick={() => {
+                void nearby.stopPresence().finally(onSignOut);
+              }}
             >
               <LogOut size={18} />
               ログアウト

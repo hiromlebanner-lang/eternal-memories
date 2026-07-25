@@ -20,6 +20,7 @@ import { readPhotoMetadata } from "../lib/image";
 import type { AlbumPhoto, PhotoCategory } from "../types";
 import { CATEGORY_META } from "../types";
 import { Modal } from "./Modal";
+import { MapAttribution } from "./MapAttribution";
 
 interface PhotoEditorValues {
   file?: File;
@@ -300,9 +301,9 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
                 center={[latitude ?? 36.3, longitude ?? 138.2]}
                 zoom={latitude != null ? 13 : 5}
                 zoomControl={false}
+                attributionControl={false}
               >
                 <TileLayer
-                  attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
                 />
                 <LocationEvents
@@ -318,6 +319,7 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
                   </>
                 ) : null}
               </MapContainer>
+              <MapAttribution />
               <span className="location-map__hint">
                 <Navigation size={13} />
                 地図をタップして調整

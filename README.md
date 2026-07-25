@@ -205,7 +205,7 @@ SQL Editorへ戻り、`Ctrl + V` で貼り付けます。
 
 このSQLにより次がまとめて作成されます。
 
-- 6つのアプリ用テーブル
+- 7つのアプリ用テーブル
 - 各テーブルのRLS有効化と権限ポリシー
 - Private Storageバケット `album-photos`
 - Storage用RLSポリシー
@@ -222,8 +222,9 @@ SQL Editorへ戻り、`Ctrl + V` で貼り付けます。
 - `photos`
 - `album_invitations`
 - `album_join_requests`
+- `nearby_invitations`
 
-SQL実行後、左メニューの `Table Editor` を開き、上の6テーブルが表示されることを確認します。手動でテーブルや「全員許可」ポリシーを追加する必要はありません。
+SQL実行後、左メニューの `Table Editor` を開き、上の7テーブルが表示されることを確認します。手動でテーブルや「全員許可」ポリシーを追加する必要はありません。
 
 SQLは更新時に再実行できますが、本番データがある場合は先にバックアップを取得してください。既存の招待コードは維持され、旧 `editor` 権限は `member`、各アルバム作成者は `owner` へ移行されます。
 
@@ -501,7 +502,8 @@ where schemaname = 'public'
     'album_members',
     'photos',
     'album_invitations',
-    'album_join_requests'
+    'album_join_requests',
+    'nearby_invitations'
   )
 order by tablename;
 
@@ -514,7 +516,8 @@ where schemaname = 'public'
     'album_members',
     'photos',
     'album_invitations',
-    'album_join_requests'
+    'album_join_requests',
+    'nearby_invitations'
   )
 group by tablename
 order by tablename;
@@ -536,8 +539,8 @@ order by policyname;
 
 確認結果:
 
-- 1つ目: 6行すべての `rowsecurity` が `true`
-- 2つ目: 6テーブルすべてに1件以上のPolicy
+- 1つ目: 7行すべての `rowsecurity` が `true`
+- 2つ目: 7テーブルすべてに1件以上のPolicy
 - 3つ目: `album-photos` が1行、`public` が `false`
 - 4つ目: MapAlbum用Storage Policyが3件
 
@@ -579,8 +582,8 @@ order by policyname;
 #### SQL・RLS・Storage
 
 - [ ] `supabase/schema.sql` の一部ではなくファイル全体を実行した
-- [ ] `profiles`、`albums`、`album_members`、`photos`、`album_invitations`、`album_join_requests` が存在する
-- [ ] 6テーブルすべてでRLSがEnabled
+- [ ] `profiles`、`albums`、`album_members`、`photos`、`album_invitations`、`album_join_requests`、`nearby_invitations` が存在する
+- [ ] 7テーブルすべてでRLSがEnabled
 - [ ] Policyが `authenticated` とアルバム権限を検証している
 - [ ] `anon` 向けの全件許可Policyを追加していない
 - [ ] `album-photos` Bucketが存在する
@@ -1058,7 +1061,7 @@ Console warnings: 0
 | 9 | 地図表示 | 合格 | 実機で最終確認推奨 | OpenStreetMap、丸い写真アイコン、カテゴリー、枚数、タップ動作 |
 | 10 | 招待URL発行 | 合格 | DB接続後に要確認 | 汎用URL、メール専用URL、QR値、サブパス維持、参加承認制 |
 | 11 | 権限別制限 | 合格 | 4アカウント実接続は要確認 | owner／admin／member／viewerのUI判定、RLS、RPC、Storage policy |
-| 12 | 未ログインで非表示 | 合格 | Supabase REST直アクセスは要確認 | クライアント非表示、全6テーブルRLS、anon権限取消、Private bucket |
+| 12 | 未ログインで非表示 | 合格 | Supabase REST直アクセスは要確認 | クライアント非表示、全7テーブルRLS、anon権限取消、Private bucket |
 
 `実Supabase・実機E2E` が「要確認」の項目は失敗ではなく、現在の公開環境に `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` が未設定で、実メールアドレス、実データベース、iPhoneのカメラ／GPSへ接続できないため未実施です。実サービスを有効にする前に、このREADMEのSupabase設定手順に従って `supabase/schema.sql` の最新版を適用し、環境変数を設定してください。
 
@@ -1086,6 +1089,63 @@ Console warnings: 0
 1. Supabase SQL Editorで最新版の `supabase/schema.sql` を実行する
 2. Confirm emailを有効にし、公開URLとローカルURLをRedirect URLsへ登録する
 3. 公開環境へ `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` を設定する
+
+## 近くの人を探す（Geolocation + Realtime Presence）
+
+設定画面の「近くの人を探す」は初期状態ではOFFです。利用者がONへ
+切り替えたときだけ位置情報の許可を求め、アプリが前面にある間だけ検索します。
+Bluetoothとバックグラウンド追跡は使用しません。
+
+Presenceへ送る値は、緯度・経度を小数4桁相当の整数へ丸めた値と更新時刻だけです。
+位置情報をアプリのテーブルへ保存しません。相手の画面には座標や距離を表示せず、
+50m以内かつ5分以内に更新された相手だけを
+「近くに〇〇さんがいます」と表示します。OFF、ログアウト、ページ終了、
+バックグラウンド移行時はGeolocationの監視とPresenceを解除します。
+
+近くの人への招待は次の順序です。
+
+1. オーナーまたは管理者が「招待する」を押す
+2. 相手の設定画面へ5分間有効な招待を表示する
+3. 相手が「受け取る」を押した場合だけ、通常の参加申請を作成する
+4. オーナーまたは管理者が参加申請を承認して、初めてメンバーになる
+
+検出しただけで自動参加することはありません。位置情報を拒否した場合は、
+既存のQRコード、招待URL、招待コードを利用できます。
+
+### Supabaseへ追加設定を反映する
+
+この機能を使う前に、Supabase Dashboardの `SQL Editor` で最新版の
+`supabase/schema.sql` を全体実行してください。次の設定が追加されます。
+
+- `nearby_invitations` テーブルとRLS
+- 近距離招待の作成・受諾・辞退RPC
+- `realtime.messages` のPrivate Channel用Authorization Policy
+- `nearby_invitations` のRealtime publication
+- 未ログインユーザーの全アクセス拒否
+
+Supabase Dashboardの `Realtime` 設定でRealtimeが有効であることも確認してください。
+クライアントは `nearby-users` をPrivate Channelとして接続します。
+Publishable Key以外のキーをPWAへ設定しないでください。
+
+### 2ユーザーでの確認
+
+1. iPhone Safariと別のiPhone／iPadで、別アカウントへログインする
+2. 両端末で設定画面の「近くの人を探す」をONにして位置情報を許可する
+3. 端末を50m以内に置き、オーナー側に「近くに〇〇さんがいます」が出ることを確認
+4. 「招待する」を押し、相手側で「受け取る」を押す
+5. オーナー側の参加申請管理で承認するまで相手が参加しないことを確認
+6. 相手側でOFFまたはログアウトし、オーナー側の候補から消えることを確認
+7. 位置情報を拒否した端末でQR・URL・招待コードの案内が出ることを確認
+
+ホーム画面へ追加したPWAでも同じ手順で確認します。位置情報を以前拒否した場合は、
+iPhoneの `設定` → `プライバシーとセキュリティ` → `位置情報サービス` から
+SafariまたはMapAlbumの許可を変更してください。
+
+## 地図ライセンス表示
+
+地図右下に `Leaflet | © OpenStreetMap contributors` を常時表示します。
+表示は削除せず、文字リンクだけをタップ可能にしています。半透明背景、約10pxの
+文字、Safe Area対応の余白を使い、ズームボタンは右上へ移動して重なりを防ぎます。
 4. owner、admin、member、viewer用に確認済みメールの4アカウントを用意する
 5. 上表の1から12までを順番に実行する
 6. iPhone Safariで写真撮影、GPS許可／拒否、ホーム画面起動、オフライン再表示を確認する

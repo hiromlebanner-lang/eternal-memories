@@ -60,6 +60,21 @@ export interface AlbumJoinRequest {
   email?: string;
 }
 
+export interface NearbyUser {
+  id: string;
+  displayName: string;
+}
+
+export interface NearbyInvitation {
+  id: string;
+  albumId: string;
+  albumName: string;
+  invitedBy: string;
+  invitedByName: string;
+  createdAt: string;
+  expiresAt: string;
+}
+
 export interface AlbumPhoto {
   id: string;
   album_id: string;

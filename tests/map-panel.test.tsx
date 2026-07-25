@@ -51,6 +51,19 @@ it("09 地図に丸い写真アイコンと同一地点の枚数を表示し、�
   render(<MapPanel photos={[first, second]} onSelect={onSelect} />);
 
   expect(screen.getByTestId("map-container")).toBeInTheDocument();
+  expect(screen.getByLabelText("地図ライセンス")).toHaveTextContent(
+    "Leaflet | © OpenStreetMap contributors",
+  );
+  expect(screen.getByRole("link", { name: "Leaflet" })).toHaveAttribute(
+    "href",
+    "https://leafletjs.com",
+  );
+  expect(
+    screen.getByRole("link", { name: "OpenStreetMap contributors" }),
+  ).toHaveAttribute(
+    "href",
+    "https://www.openstreetmap.org/copyright",
+  );
   expect(screen.getByText("1か所・2枚")).toBeInTheDocument();
   const marker = screen.getByRole("button", { name: "map-marker" });
   expect(marker.dataset.iconHtml).toContain("map-photo-marker");

@@ -112,6 +112,24 @@ create table if not exists public.album_join_requests (
   )
 );
 
+create table if not exists public.nearby_invitations (
+  id uuid primary key default gen_random_uuid(),
+  album_id uuid not null references public.albums(id) on delete cascade,
+  invited_user_id uuid not null references public.profiles(id) on delete cascade,
+  invited_by uuid not null default auth.uid() references public.profiles(id),
+  status text not null default 'pending'
+    check (status in ('pending', 'accepted', 'declined', 'expired')),
+  created_at timestamptz not null default now(),
+  expires_at timestamptz not null default (now() + interval '5 minutes'),
+  responded_at timestamptz,
+  check (invited_user_id <> invited_by),
+  check (
+    (status = 'pending' and responded_at is null)
+    or
+    (status <> 'pending' and responded_at is not null)
+  )
+);
+
 -- 旧版のenumを参照する同名RPCがオーバーロードとして残ると、PostgRESTから
 -- 呼び分けられません。MapAlbumが管理するRPCだけを署名ごと削除し、後段で
 -- album_role_v2を使う定義へ統一します。依存する旧RLSも後段で再作成します。
@@ -135,6 +153,10 @@ begin
         'request_album_membership',
         'review_album_join_request',
         'change_album_member_role',
+        'get_nearby_profiles',
+        'create_nearby_invitation',
+        'get_my_nearby_invitations',
+        'respond_nearby_invitation',
         'join_album_by_code',
         'safe_uuid'
       )
@@ -275,6 +297,11 @@ create index if not exists album_join_requests_album_status_idx
   on public.album_join_requests(album_id, status, created_at);
 create unique index if not exists album_join_requests_one_pending_user_idx
   on public.album_join_requests(album_id, user_id)
+  where status = 'pending';
+create index if not exists nearby_invitations_target_status_idx
+  on public.nearby_invitations(invited_user_id, status, expires_at desc);
+create unique index if not exists nearby_invitations_one_pending_target_idx
+  on public.nearby_invitations(album_id, invited_user_id)
   where status = 'pending';
 
 create or replace function public.set_updated_at()
@@ -422,6 +449,23 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created
 after insert or update of email, raw_user_meta_data on auth.users
 for each row execute function public.handle_new_user();
+
+-- SQL実行より前に作成済みだったAuthユーザーにもprofiles行を補います。
+insert into public.profiles (id, email, display_name, avatar_url)
+select
+  app_user.id,
+  lower(coalesce(app_user.email, '')),
+  coalesce(
+    app_user.raw_user_meta_data ->> 'display_name',
+    app_user.raw_user_meta_data ->> 'full_name',
+    split_part(coalesce(app_user.email, 'member'), '@', 1)
+  ),
+  app_user.raw_user_meta_data ->> 'avatar_url'
+from auth.users as app_user
+on conflict (id) do update set
+  email = excluded.email,
+  display_name = excluded.display_name,
+  avatar_url = excluded.avatar_url;
 
 create or replace function public.add_album_creator_as_owner()
 returns trigger
@@ -875,6 +919,220 @@ begin
 end;
 $$;
 
+create or replace function public.get_nearby_profiles(p_user_ids uuid[])
+returns table (
+  id uuid,
+  display_name text
+)
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'ログインが必要です';
+  end if;
+  if coalesce(cardinality(p_user_ids), 0) > 50 then
+    raise exception '一度に確認できるユーザー数を超えています';
+  end if;
+
+  return query
+  select profile.id, profile.display_name
+  from public.profiles as profile
+  where profile.id = any(coalesce(p_user_ids, array[]::uuid[]))
+    and profile.id <> auth.uid();
+end;
+$$;
+
+create or replace function public.create_nearby_invitation(
+  p_album_id uuid,
+  p_invited_user_id uuid
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  result_id uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'ログインが必要です';
+  end if;
+  if p_invited_user_id is null or p_invited_user_id = auth.uid() then
+    raise exception '招待するユーザーを確認できません';
+  end if;
+  if not public.is_album_manager(p_album_id) then
+    raise exception 'このアルバムへ招待する権限がありません';
+  end if;
+  if not exists (
+    select 1 from public.profiles where id = p_invited_user_id
+  ) then
+    raise exception '招待するユーザーが見つかりません';
+  end if;
+  if exists (
+    select 1
+    from public.album_members
+    where album_id = p_album_id
+      and user_id = p_invited_user_id
+  ) then
+    raise exception 'このユーザーはすでにアルバムへ参加しています';
+  end if;
+
+  update public.nearby_invitations
+  set status = 'expired', responded_at = now()
+  where album_id = p_album_id
+    and invited_user_id = p_invited_user_id
+    and status = 'pending'
+    and expires_at <= now();
+
+  insert into public.nearby_invitations (
+    album_id,
+    invited_user_id,
+    invited_by
+  )
+  values (
+    p_album_id,
+    p_invited_user_id,
+    auth.uid()
+  )
+  on conflict (album_id, invited_user_id)
+    where status = 'pending'
+  do update set
+    invited_by = excluded.invited_by,
+    created_at = now(),
+    expires_at = now() + interval '5 minutes'
+  returning id into result_id;
+
+  return result_id;
+end;
+$$;
+
+create or replace function public.get_my_nearby_invitations()
+returns table (
+  id uuid,
+  album_id uuid,
+  album_name text,
+  invited_by uuid,
+  invited_by_name text,
+  created_at timestamptz,
+  expires_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'ログインが必要です';
+  end if;
+
+  update public.nearby_invitations
+  set status = 'expired', responded_at = now()
+  where invited_user_id = auth.uid()
+    and status = 'pending'
+    and expires_at <= now();
+
+  return query
+  select
+    invitation.id,
+    invitation.album_id,
+    album.name,
+    invitation.invited_by,
+    inviter.display_name,
+    invitation.created_at,
+    invitation.expires_at
+  from public.nearby_invitations as invitation
+  join public.albums as album on album.id = invitation.album_id
+  join public.profiles as inviter on inviter.id = invitation.invited_by
+  where invitation.invited_user_id = auth.uid()
+    and invitation.status = 'pending'
+    and invitation.expires_at > now()
+  order by invitation.created_at desc;
+end;
+$$;
+
+create or replace function public.respond_nearby_invitation(
+  p_invitation_id uuid,
+  p_accept boolean
+)
+returns uuid
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  target public.nearby_invitations%rowtype;
+  request_id uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'ログインが必要です';
+  end if;
+
+  select *
+    into target
+  from public.nearby_invitations
+  where id = p_invitation_id
+    and invited_user_id = auth.uid()
+  for update;
+
+  if target.id is null or target.status <> 'pending' then
+    raise exception '承認待ちの近距離招待が見つかりません';
+  end if;
+  if target.expires_at <= now() then
+    update public.nearby_invitations
+    set status = 'expired', responded_at = now()
+    where id = target.id;
+    raise exception '近距離招待の有効期限が切れています';
+  end if;
+
+  if not p_accept then
+    update public.nearby_invitations
+    set status = 'declined', responded_at = now()
+    where id = target.id;
+    return null;
+  end if;
+
+  if exists (
+    select 1
+    from public.album_members
+    where album_id = target.album_id
+      and user_id = auth.uid()
+  ) then
+    raise exception 'このアルバムにはすでに参加しています';
+  end if;
+
+  select request.id
+    into request_id
+  from public.album_join_requests as request
+  where request.album_id = target.album_id
+    and request.user_id = auth.uid()
+    and request.status = 'pending'
+  limit 1;
+
+  if request_id is null then
+    insert into public.album_join_requests (
+      album_id,
+      user_id,
+      requested_role
+    )
+    values (
+      target.album_id,
+      auth.uid(),
+      'member'
+    )
+    returning id into request_id;
+  end if;
+
+  update public.nearby_invitations
+  set status = 'accepted', responded_at = now()
+  where id = target.id;
+
+  return request_id;
+end;
+$$;
+
 create or replace function public.safe_uuid(value text)
 returns uuid
 language sql
@@ -913,6 +1171,11 @@ revoke all on function public.review_album_join_request(
 revoke all on function public.change_album_member_role(
   uuid, uuid, public.album_role_v2
 ) from public;
+revoke all on function public.get_nearby_profiles(uuid[]) from public;
+revoke all on function public.create_nearby_invitation(uuid, uuid) from public;
+revoke all on function public.get_my_nearby_invitations() from public;
+revoke all on function public.respond_nearby_invitation(uuid, boolean)
+  from public;
 revoke all on function public.safe_uuid(text) from public;
 
 grant execute on function public.is_album_member(uuid) to authenticated;
@@ -931,6 +1194,13 @@ grant execute on function public.review_album_join_request(
 grant execute on function public.change_album_member_role(
   uuid, uuid, public.album_role_v2
 ) to authenticated;
+grant execute on function public.get_nearby_profiles(uuid[]) to authenticated;
+grant execute on function public.create_nearby_invitation(uuid, uuid)
+  to authenticated;
+grant execute on function public.get_my_nearby_invitations()
+  to authenticated;
+grant execute on function public.respond_nearby_invitation(uuid, boolean)
+  to authenticated;
 grant execute on function public.safe_uuid(text) to authenticated;
 grant usage on type public.album_role_v2 to authenticated;
 grant usage on type public.photo_category to authenticated;
@@ -941,6 +1211,8 @@ alter table public.album_members enable row level security;
 alter table public.photos enable row level security;
 alter table public.album_invitations enable row level security;
 alter table public.album_join_requests enable row level security;
+alter table public.nearby_invitations enable row level security;
+alter table realtime.messages enable row level security;
 
 revoke all on table public.profiles from anon;
 revoke all on table public.albums from anon;
@@ -948,6 +1220,7 @@ revoke all on table public.album_members from anon;
 revoke all on table public.photos from anon;
 revoke all on table public.album_invitations from anon;
 revoke all on table public.album_join_requests from anon;
+revoke all on table public.nearby_invitations from anon;
 
 -- 再実行前の広い権限を残さないようauthenticatedもいったん全取消します。
 revoke all on table public.profiles from authenticated;
@@ -956,6 +1229,7 @@ revoke all on table public.album_members from authenticated;
 revoke all on table public.photos from authenticated;
 revoke all on table public.album_invitations from authenticated;
 revoke all on table public.album_join_requests from authenticated;
+revoke all on table public.nearby_invitations from authenticated;
 
 grant select on table public.profiles to authenticated;
 grant update (display_name, avatar_url)
@@ -985,8 +1259,9 @@ grant update (caption, category, captured_at, latitude, longitude)
   on table public.photos to authenticated;
 grant select on table public.album_invitations to authenticated;
 grant select on table public.album_join_requests to authenticated;
+grant select on table public.nearby_invitations to authenticated;
 
--- MapAlbumの6テーブルに旧版の広いポリシーを残さず、以下で再構築します。
+-- MapAlbumの7テーブルに旧版の広いポリシーを残さず、以下で再構築します。
 do $$
 declare
   old_policy record;
@@ -1001,7 +1276,8 @@ begin
         'album_members',
         'photos',
         'album_invitations',
-        'album_join_requests'
+        'album_join_requests',
+        'nearby_invitations'
       )
   loop
     execute format(
@@ -1114,6 +1390,19 @@ to authenticated
 using (
   public.is_album_manager(album_id)
   or user_id = auth.uid()
+);
+
+drop policy if exists "participants view nearby invitations"
+  on public.nearby_invitations;
+create policy "participants view nearby invitations"
+on public.nearby_invitations for select
+to authenticated
+using (
+  invited_user_id = auth.uid()
+  or (
+    invited_by = auth.uid()
+    and public.is_album_manager(album_id)
+  )
 );
 
 drop policy if exists "members view photos" on public.photos;
@@ -1245,6 +1534,20 @@ using (
   )
 );
 
+drop policy if exists "authenticated users read nearby presence"
+  on realtime.messages;
+create policy "authenticated users read nearby presence"
+on realtime.messages for select
+to authenticated
+using (realtime.topic() = 'nearby-users');
+
+drop policy if exists "authenticated users send nearby presence"
+  on realtime.messages;
+create policy "authenticated users send nearby presence"
+on realtime.messages for insert
+to authenticated
+with check (realtime.topic() = 'nearby-users');
+
 do $$
 begin
   if not exists (
@@ -1262,5 +1565,10 @@ begin
     where pubname = 'supabase_realtime'
       and schemaname = 'public' and tablename = 'album_join_requests'
   ) then alter publication supabase_realtime add table public.album_join_requests; end if;
+  if not exists (
+    select 1 from pg_publication_tables
+    where pubname = 'supabase_realtime'
+      and schemaname = 'public' and tablename = 'nearby_invitations'
+  ) then alter publication supabase_realtime add table public.nearby_invitations; end if;
 end
 $$;
