@@ -48,6 +48,12 @@ describe("Supabase RLS・未ログイン遮断", () => {
     );
   });
 
+  it("アルバム作成者はRETURNING時点でも作成行を閲覧できる", () => {
+    expect(schema).toMatch(
+      /create policy "members view albums"[\s\S]*created_by = auth\.uid\(\)[\s\S]*public\.is_album_member\(id\)/,
+    );
+  });
+
   it("写真の投稿者・StorageパスをDBトリガーでも検証する", () => {
     expect(schema).toContain("create trigger photos_protect_identity");
     expect(schema).toContain("new.author_id is distinct from auth.uid()");

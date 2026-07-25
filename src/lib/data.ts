@@ -47,6 +47,17 @@ function requireSupabase() {
   return supabase;
 }
 
+function toDataError(error: unknown, fallback: string) {
+  if (error instanceof Error) return error;
+  if (typeof error === "object" && error !== null && "message" in error) {
+    const message = (error as { message?: unknown }).message;
+    if (typeof message === "string" && message.trim()) {
+      return new Error(message);
+    }
+  }
+  return new Error(fallback);
+}
+
 export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
   const client = requireSupabase();
 
@@ -169,12 +180,44 @@ export async function loadPhotos(
 
 export async function createAlbum(name: string, description: string) {
   const client = requireSupabase();
-  const { data, error } = await client
+  const {
+    data: { user },
+    error: userError,
+  } = await client.auth.getUser();
+  if (userError) {
+    throw toDataError(userError, "ログイン状態を確認できませんでした。");
+  }
+  if (!user) {
+    throw new Error("ログインし直してからアルバムを作成してください。");
+  }
+
+  // INSERT ... RETURNING はSELECTのRLSも同じ文中で評価します。
+  // オーナー行はAFTER INSERTトリガーで追加されるため、作成直後のRETURNINGを
+  // 避け、INSERTの完了後に別のSELECT文でIDを取得します。
+  const { error: insertError } = await client
     .from("albums")
-    .insert({ name, description })
+    .insert({ name, description });
+  if (insertError) {
+    throw toDataError(insertError, "アルバムを作成できませんでした。");
+  }
+
+  const { data, error: selectError } = await client
+    .from("albums")
     .select("id")
+    .eq("created_by", user.id)
+    .eq("name", name)
+    .order("created_at", { ascending: false })
+    .limit(1)
     .single();
-  if (error) throw error;
+  if (selectError) {
+    throw toDataError(
+      selectError,
+      "作成したアルバムの情報を取得できませんでした。",
+    );
+  }
+  if (!data?.id) {
+    throw new Error("作成したアルバムの情報を取得できませんでした。");
+  }
   return data.id as string;
 }
 

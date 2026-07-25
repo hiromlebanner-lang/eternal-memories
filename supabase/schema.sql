@@ -1032,7 +1032,10 @@ drop policy if exists "members view albums" on public.albums;
 create policy "members view albums"
 on public.albums for select
 to authenticated
-using (public.is_album_member(id));
+using (
+  created_by = auth.uid()
+  or public.is_album_member(id)
+);
 
 drop policy if exists "users create albums" on public.albums;
 create policy "users create albums"
