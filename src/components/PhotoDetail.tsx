@@ -107,7 +107,16 @@ export function PhotoDetail({
                 <UserRound size={17} />
                 投稿者
               </dt>
-              <dd>{photo.author_name}</dd>
+              <dd className="photo-author">
+                <span className="photo-author-avatar">
+                  {photo.author_avatar_url ? (
+                    <img src={photo.author_avatar_url} alt="" />
+                  ) : (
+                    photo.author_name.slice(0, 1)
+                  )}
+                </span>
+                {photo.author_name}
+              </dd>
             </div>
             <div>
               <dt>

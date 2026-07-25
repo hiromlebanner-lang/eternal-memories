@@ -28,7 +28,10 @@ export async function readPhotoMetadata(file: File): Promise<{
   }
 }
 
-export async function compressPhoto(file: File): Promise<Blob> {
+export async function compressPhoto(
+  file: File,
+  options?: { square?: boolean; maxDimension?: number; quality?: number },
+): Promise<Blob> {
   let source: CanvasImageSource;
   let width: number;
   let height: number;
@@ -60,10 +63,15 @@ export async function compressPhoto(file: File): Promise<Blob> {
     cleanup = () => URL.revokeObjectURL(objectURL);
   }
 
-  const maxDimension = 1800;
-  const scale = Math.min(1, maxDimension / Math.max(width, height));
-  const outputWidth = Math.max(1, Math.round(width * scale));
-  const outputHeight = Math.max(1, Math.round(height * scale));
+  const sourceSize = options?.square ? Math.min(width, height) : undefined;
+  const sourceX = sourceSize ? (width - sourceSize) / 2 : 0;
+  const sourceY = sourceSize ? (height - sourceSize) / 2 : 0;
+  const sourceWidth = sourceSize ?? width;
+  const sourceHeight = sourceSize ?? height;
+  const maxDimension = options?.maxDimension ?? 1800;
+  const scale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
+  const outputWidth = Math.max(1, Math.round(sourceWidth * scale));
+  const outputHeight = Math.max(1, Math.round(sourceHeight * scale));
   const canvas = document.createElement("canvas");
   canvas.width = outputWidth;
   canvas.height = outputHeight;
@@ -72,7 +80,17 @@ export async function compressPhoto(file: File): Promise<Blob> {
     cleanup();
     throw new Error("写真を変換できませんでした。");
   }
-  context.drawImage(source, 0, 0, outputWidth, outputHeight);
+  context.drawImage(
+    source,
+    sourceX,
+    sourceY,
+    sourceWidth,
+    sourceHeight,
+    0,
+    0,
+    outputWidth,
+    outputHeight,
+  );
   cleanup();
 
   return new Promise((resolve, reject) => {
@@ -82,7 +100,7 @@ export async function compressPhoto(file: File): Promise<Blob> {
         else reject(new Error("写真を圧縮できませんでした。"));
       },
       "image/jpeg",
-      0.84,
+      options?.quality ?? 0.84,
     );
   });
 }

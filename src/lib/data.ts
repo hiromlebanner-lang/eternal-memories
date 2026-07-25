@@ -194,6 +194,17 @@ export async function loadPhotos(
     if (error) throw error;
 
     const rows = data ?? [];
+    const authorIDs = [...new Set(rows.map((photo) => photo.author_id))];
+    const { data: authorProfiles } =
+      authorIDs.length > 0
+        ? await client
+            .from("profiles")
+            .select("id, avatar_url")
+            .in("id", authorIDs)
+        : { data: [] };
+    const avatarByAuthor = new Map(
+      (authorProfiles ?? []).map((profile) => [profile.id, profile.avatar_url]),
+    );
     const paths = rows.map((photo) => photo.storage_path).filter(Boolean);
     const signedURLByPath = new Map<string, string>();
 
@@ -214,6 +225,7 @@ export async function loadPhotos(
       album_id: photo.album_id,
       author_id: photo.author_id,
       author_name: photo.author_name,
+      author_avatar_url: avatarByAuthor.get(photo.author_id) ?? null,
       storage_path: photo.storage_path,
       image_url: signedURLByPath.get(photo.storage_path) ?? "",
       caption: photo.caption ?? "",
@@ -327,6 +339,82 @@ export async function deleteAlbum(albumID: string) {
     .maybeSingle();
   if (verifyError) throw toAppError(verifyError, "削除結果を確認できませんでした。");
   if (remaining) throw new Error("アルバムを削除できるのはオーナーだけです");
+}
+
+async function updateOwnProfile(updates: {
+  display_name?: string;
+  avatar_url?: string | null;
+}) {
+  const client = requireSupabase();
+  const {
+    data: { user },
+    error: userError,
+  } = await client.auth.getUser();
+  if (userError || !user) throw new Error("ログイン状態を確認できませんでした。");
+
+  const { error: profileError } = await client
+    .from("profiles")
+    .update(updates)
+    .eq("id", user.id);
+  if (profileError) throw toAppError(profileError, "プロフィールを更新できませんでした。");
+
+  const metadata = {
+    ...(updates.display_name !== undefined
+      ? { display_name: updates.display_name }
+      : {}),
+    ...(updates.avatar_url !== undefined ? { avatar_url: updates.avatar_url } : {}),
+  };
+  const { error: authError } = await client.auth.updateUser({ data: metadata });
+  if (authError) throw toAppError(authError, "プロフィールを更新できませんでした。");
+}
+
+export async function updateProfileDisplayName(displayName: string) {
+  const value = displayName.trim();
+  if (!value) throw new Error("表示名を入力してください。");
+  await updateOwnProfile({ display_name: value });
+}
+
+export async function uploadProfileAvatar(file: File) {
+  const client = requireSupabase();
+  const {
+    data: { user },
+    error: userError,
+  } = await client.auth.getUser();
+  if (userError || !user) throw new Error("ログイン状態を確認できませんでした。");
+
+  const avatar = await compressPhoto(file, {
+    square: true,
+    maxDimension: 1024,
+    quality: 0.82,
+  });
+  const path = `${user.id}.jpg`;
+  const { error: uploadError } = await client.storage
+    .from("avatars")
+    .upload(path, avatar, {
+      contentType: "image/jpeg",
+      cacheControl: "3600",
+      upsert: true,
+    });
+  if (uploadError) throw toAppError(uploadError, "プロフィール画像を保存できませんでした。");
+
+  const { data } = client.storage.from("avatars").getPublicUrl(path);
+  const avatarURL = `${data.publicUrl}?v=${Date.now()}`;
+  await updateOwnProfile({ avatar_url: avatarURL });
+  return avatarURL;
+}
+
+export async function deleteProfileAvatar() {
+  const client = requireSupabase();
+  const {
+    data: { user },
+    error: userError,
+  } = await client.auth.getUser();
+  if (userError || !user) throw new Error("ログイン状態を確認できませんでした。");
+  const { error: storageError } = await client.storage
+    .from("avatars")
+    .remove([`${user.id}.jpg`]);
+  if (storageError) throw toAppError(storageError, "プロフィール画像を削除できませんでした。");
+  await updateOwnProfile({ avatar_url: null });
 }
 
 export async function requestAlbumMembership(input: {
@@ -558,7 +646,7 @@ export async function loadMembers(albumID: string): Promise<AlbumMember[]> {
   const client = requireSupabase();
   const { data, error } = await client
     .from("album_members")
-    .select("album_id, user_id, role, joined_at, profiles(display_name, email)")
+    .select("album_id, user_id, role, joined_at, profiles(display_name, email, avatar_url)")
     .eq("album_id", albumID)
     .order("joined_at");
   if (error) throw error;
@@ -572,6 +660,7 @@ export async function loadMembers(albumID: string): Promise<AlbumMember[]> {
       joined_at: row.joined_at,
       display_name: profile?.display_name ?? "メンバー",
       email: profile?.email ?? "",
+      avatar_url: profile?.avatar_url ?? null,
     };
   });
 }
@@ -583,7 +672,7 @@ export async function loadJoinRequests(
   const { data, error } = await client
     .from("album_join_requests")
     .select(
-      "id, album_id, user_id, invitation_id, requested_role, status, created_at, profiles(display_name, email)",
+      "id, album_id, user_id, invitation_id, requested_role, status, created_at, profiles(display_name, email, avatar_url)",
     )
     .eq("album_id", albumID)
     .eq("status", "pending")
@@ -602,6 +691,7 @@ export async function loadJoinRequests(
       created_at: row.created_at,
       display_name: profile?.display_name ?? "参加希望者",
       email: profile?.email ?? "",
+      avatar_url: profile?.avatar_url ?? null,
     };
   });
 }

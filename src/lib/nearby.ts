@@ -26,6 +26,7 @@ type PresencePayload = {
 type NearbyProfileRow = {
   id: string;
   display_name: string;
+  avatar_url?: string | null;
 };
 
 type NearbyInvitationRow = {
@@ -111,6 +112,26 @@ export async function loadNearbyProfileNames(userIDs: string[]) {
     ((data ?? []) as NearbyProfileRow[]).map((profile) => [
       profile.id,
       profile.display_name,
+    ]),
+  );
+}
+
+async function loadNearbyProfileCards(userIDs: string[]) {
+  if (userIDs.length === 0) {
+    return new Map<string, { displayName: string; avatarUrl: string | null }>();
+  }
+  const client = requireSupabase();
+  const { data, error } = await client.rpc("get_nearby_profile_cards", {
+    p_user_ids: userIDs.slice(0, 50),
+  });
+  if (error) throw error;
+  return new Map(
+    ((data ?? []) as NearbyProfileRow[]).map((profile) => [
+      profile.id,
+      {
+        displayName: profile.display_name,
+        avatarUrl: profile.avatar_url ?? null,
+      },
     ]),
   );
 }
@@ -316,11 +337,15 @@ export function useNearbyPeople(input: {
         excludedUserIDsRef.current,
       );
       try {
-        const names = await loadNearbyProfileNames(ids);
+        const profiles = await loadNearbyProfileCards(ids);
         if (generationRef.current !== generation) return;
         setNearbyUsers(
           ids
-            .map((id) => ({ id, displayName: names.get(id) ?? "" }))
+            .map((id) => ({
+              id,
+              displayName: profiles.get(id)?.displayName ?? "",
+              avatarUrl: profiles.get(id)?.avatarUrl ?? null,
+            }))
             .filter((candidate) => candidate.displayName),
         );
       } catch {

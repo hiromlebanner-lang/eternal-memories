@@ -113,7 +113,11 @@ export function NearbyPeopleSettings({
                 {nearbyUsers.map((candidate) => (
                   <article className="nearby-person" key={candidate.id}>
                     <span className="nearby-person__avatar">
-                      {candidate.displayName.slice(0, 1)}
+                      {candidate.avatarUrl ? (
+                        <img src={candidate.avatarUrl} alt="" />
+                      ) : (
+                        candidate.displayName.slice(0, 1)
+                      )}
                     </span>
                     <span>
                       <strong>

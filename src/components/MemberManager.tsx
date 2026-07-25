@@ -190,7 +190,11 @@ export function MemberManager({
                 return (
                   <article className="approval-row" key={request.id}>
                     <span className="member-avatar" aria-hidden="true">
-                      <UserRound size={20} />
+                      {request.avatar_url ? (
+                        <img src={request.avatar_url} alt="" />
+                      ) : (
+                        <UserRound size={20} />
+                      )}
                     </span>
                     <span className="member-identity">
                       <strong>{applicantName}</strong>
@@ -296,7 +300,9 @@ export function MemberManager({
               return (
                 <article className="member-row" key={member.user_id}>
                   <span className="member-avatar" aria-hidden="true">
-                    {isOwner ? (
+                    {member.avatar_url ? (
+                      <img src={member.avatar_url} alt="" />
+                    ) : isOwner ? (
                       <ShieldCheck size={20} />
                     ) : (
                       <UserRound size={20} />

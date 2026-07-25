@@ -1,4 +1,4 @@
-import { CalendarDays, MapPin } from "lucide-react";
+import { CalendarDays } from "lucide-react";
 import type { AlbumPhoto } from "../types";
 import { CATEGORY_META } from "../types";
 
@@ -43,7 +43,13 @@ export function PhotoGrid({ photos, onSelect }: PhotoGridProps) {
                   month: "short",
                   day: "numeric",
                 }).format(new Date(photo.captured_at))}
-                <MapPin size={13} />
+                <span className="photo-author-avatar">
+                  {photo.author_avatar_url ? (
+                    <img src={photo.author_avatar_url} alt="" />
+                  ) : (
+                    photo.author_name.slice(0, 1)
+                  )}
+                </span>
                 {photo.author_name}
               </span>
             </div>

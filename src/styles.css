@@ -1124,6 +1124,38 @@ img {
   font-size: 9px;
 }
 
+.photo-author,
+.photo-author-avatar {
+  display: inline-flex;
+  align-items: center;
+}
+
+.photo-author {
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.photo-author-avatar {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 auto;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 50%;
+  color: white;
+  background: linear-gradient(135deg, var(--ocean), #7774c8);
+  font-size: 8px;
+  font-weight: 800;
+}
+
+.photo-author-avatar img,
+.member-avatar img,
+.nearby-person__avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
 .empty-state,
 .welcome-empty {
   min-height: 48vh;
@@ -1910,6 +1942,7 @@ img {
   height: 42px;
   place-items: center;
   border-radius: 50%;
+  overflow: hidden;
   color: var(--accent-strong);
   background: var(--accent-soft);
 }
@@ -2102,12 +2135,17 @@ img {
 
 .profile-row {
   display: flex;
+  width: 100%;
   align-items: center;
   gap: 12px;
   margin-bottom: 7px;
   padding: 12px;
+  border: 0;
   border-radius: 16px;
   background: var(--surface-soft);
+  color: var(--text);
+  cursor: pointer;
+  text-align: left;
 }
 
 .profile-avatar {
@@ -2121,6 +2159,13 @@ img {
   background: linear-gradient(135deg, var(--ocean), #7774c8);
   font-size: 20px;
   font-weight: 800;
+}
+
+.profile-avatar--large {
+  width: 88px;
+  height: 88px;
+  margin: 0 auto;
+  font-size: 32px;
 }
 
 .profile-row > span:last-child {
@@ -2219,6 +2264,7 @@ img {
   width: 34px;
   height: 34px;
   place-items: center;
+  overflow: hidden;
   border-radius: 50%;
   color: white;
   background: linear-gradient(135deg, var(--accent), var(--ocean));

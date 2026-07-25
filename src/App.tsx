@@ -14,6 +14,7 @@ import {
   Search,
   Settings,
   Sun,
+  Trash2,
   UserPlus,
   Wifi,
   X,
@@ -34,6 +35,7 @@ import {
   clearPrivateOfflineData,
   createAlbum,
   deleteAlbum,
+  deleteProfileAvatar,
   deletePhoto,
   loadAlbumInviteSettings,
   loadAlbums,
@@ -41,7 +43,9 @@ import {
   loadMyPendingJoinRequests,
   loadPhotos,
   requestAlbumMembership,
+  updateProfileDisplayName,
   updatePhoto,
+  uploadProfileAvatar,
   uploadPhoto,
 } from "./lib/data";
 import {
@@ -307,12 +311,13 @@ export default function App() {
 }
 
 function Dashboard({
-  user,
+  user: sessionUser,
   onSignOut,
 }: {
   user: AppUser;
   onSignOut: () => Promise<void>;
 }) {
+  const [user, setUser] = useState(sessionUser);
   const [dark, setDark] = useDarkMode();
   const [albums, setAlbums] = useState<Album[]>([]);
   const [selectedAlbumID, setSelectedAlbumID] = useState("");
@@ -333,6 +338,12 @@ function Dashboard({
   const [sharingAlbum, setSharingAlbum] = useState<Album>();
   const [showsMembers, setShowsMembers] = useState(false);
   const [showsSettings, setShowsSettings] = useState(false);
+  const [showsProfileEdit, setShowsProfileEdit] = useState(false);
+  const [showsAvatarActions, setShowsAvatarActions] = useState(false);
+  const [profileName, setProfileName] = useState(sessionUser.displayName);
+  const [profileBusy, setProfileBusy] = useState(false);
+  const cameraAvatarInput = useRef<HTMLInputElement>(null);
+  const libraryAvatarInput = useRef<HTMLInputElement>(null);
   const [pendingJoinCount, setPendingJoinCount] = useState(0);
   const [managedJoinRequests, setManagedJoinRequests] = useState<
     AlbumJoinRequest[]
@@ -347,6 +358,11 @@ function Dashboard({
     useState<string>();
   const inviteHandled = useRef(false);
   const seenManagerRequestIDs = useRef(seenJoinRequestIDs(user.id));
+
+  useEffect(() => {
+    setUser(sessionUser);
+    setProfileName(sessionUser.displayName);
+  }, [sessionUser]);
 
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumID);
   const canInviteNearby = Boolean(
@@ -774,6 +790,58 @@ function Dashboard({
     setToast("アルバムを削除しました");
   };
 
+  const changeAvatar = async (file?: File) => {
+    if (!file) return;
+    setProfileBusy(true);
+    try {
+      const avatarUrl = await uploadProfileAvatar(file);
+      setUser((current) => ({ ...current, avatarUrl }));
+      setShowsAvatarActions(false);
+      setToast("プロフィール画像を更新しました");
+    } catch (error) {
+      setToast(
+        error instanceof Error
+          ? error.message
+          : "プロフィール画像を更新できませんでした。",
+      );
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const removeAvatar = async () => {
+    setProfileBusy(true);
+    try {
+      await deleteProfileAvatar();
+      setUser((current) => ({ ...current, avatarUrl: null }));
+      setShowsAvatarActions(false);
+      setToast("プロフィール画像を削除しました");
+    } catch (error) {
+      setToast(
+        error instanceof Error
+          ? error.message
+          : "プロフィール画像を削除できませんでした。",
+      );
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
+  const saveProfileName = async () => {
+    setProfileBusy(true);
+    try {
+      await updateProfileDisplayName(profileName);
+      setUser((current) => ({ ...current, displayName: profileName.trim() }));
+      setToast("プロフィールを更新しました");
+    } catch (error) {
+      setToast(
+        error instanceof Error ? error.message : "プロフィールを更新できませんでした。",
+      );
+    } finally {
+      setProfileBusy(false);
+    }
+  };
+
   const enterAlbum = async (code: string) => {
     await requestAlbumMembership({ inviteCode: code });
     setPendingJoinCount((current) => current + 1);
@@ -1171,7 +1239,14 @@ function Dashboard({
       {showsSettings ? (
         <Modal title="設定" onClose={() => setShowsSettings(false)}>
           <div className="settings-panel">
-            <div className="profile-row">
+            <button
+              className="profile-row"
+              type="button"
+              onClick={() => {
+                setShowsSettings(false);
+                setShowsProfileEdit(true);
+              }}
+            >
               <span className="profile-avatar">
                 {user.avatarUrl ? <img src={user.avatarUrl} alt="" /> : user.displayName.slice(0, 1)}
               </span>
@@ -1179,7 +1254,7 @@ function Dashboard({
                 <strong>{user.displayName}</strong>
                 <small>{user.email}</small>
               </span>
-            </div>
+            </button>
             <button
               type="button"
               className="settings-row"
@@ -1267,6 +1342,100 @@ function Dashboard({
             >
               <LogOut size={18} />
               ログアウト
+            </button>
+          </div>
+        </Modal>
+      ) : null}
+
+      {showsProfileEdit ? (
+        <Modal
+          title="プロフィール編集"
+          onClose={() => {
+            setShowsProfileEdit(false);
+            setShowsAvatarActions(false);
+          }}
+        >
+          <div className="stack-form">
+            <span className="profile-avatar profile-avatar--large">
+              {user.avatarUrl ? (
+                <img src={user.avatarUrl} alt="" />
+              ) : (
+                user.displayName.slice(0, 1)
+              )}
+            </span>
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={profileBusy}
+              onClick={() => setShowsAvatarActions(true)}
+            >
+              プロフィール画像を変更
+            </button>
+            <input
+              ref={cameraAvatarInput}
+              hidden
+              type="file"
+              accept="image/jpeg,image/png,image/heic,image/heif,image/webp"
+              capture="environment"
+              onChange={(event) => {
+                void changeAvatar(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+            <input
+              ref={libraryAvatarInput}
+              hidden
+              type="file"
+              accept="image/jpeg,image/png,image/heic,image/heif,image/webp"
+              onChange={(event) => {
+                void changeAvatar(event.target.files?.[0]);
+                event.target.value = "";
+              }}
+            />
+            {showsAvatarActions ? (
+              <div className="album-manager__actions">
+                <button type="button" onClick={() => cameraAvatarInput.current?.click()}>
+                  <Camera size={19} />
+                  <span><strong>写真を撮る</strong></span>
+                </button>
+                <button type="button" onClick={() => libraryAvatarInput.current?.click()}>
+                  <Images size={19} />
+                  <span><strong>写真ライブラリから選択</strong></span>
+                </button>
+                <button
+                  className="danger-button"
+                  type="button"
+                  disabled={!user.avatarUrl || profileBusy}
+                  onClick={() => void removeAvatar()}
+                >
+                  <Trash2 size={19} />
+                  <span><strong>現在の画像を削除</strong></span>
+                </button>
+                <button type="button" onClick={() => setShowsAvatarActions(false)}>
+                  <X size={19} />
+                  <span><strong>キャンセル</strong></span>
+                </button>
+              </div>
+            ) : null}
+            <label className="field">
+              <span>表示名</span>
+              <input
+                value={profileName}
+                maxLength={80}
+                onChange={(event) => setProfileName(event.target.value)}
+              />
+            </label>
+            <label className="field">
+              <span>メールアドレス</span>
+              <input value={user.email} readOnly />
+            </label>
+            <button
+              className="primary-button"
+              type="button"
+              disabled={profileBusy}
+              onClick={() => void saveProfileName()}
+            >
+              {profileBusy ? "保存中…" : "保存"}
             </button>
           </div>
         </Modal>

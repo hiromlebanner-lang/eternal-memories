@@ -51,6 +51,7 @@ export interface AlbumMember {
   joined_at: string;
   display_name?: string;
   email?: string;
+  avatar_url?: string | null;
 }
 
 export interface AlbumInvitation {
@@ -75,11 +76,13 @@ export interface AlbumJoinRequest {
   album_name?: string;
   display_name?: string;
   email?: string;
+  avatar_url?: string | null;
 }
 
 export interface NearbyUser {
   id: string;
   displayName: string;
+  avatarUrl?: string | null;
 }
 
 export interface NearbyInvitation {
@@ -97,6 +100,7 @@ export interface AlbumPhoto {
   album_id: string;
   author_id: string;
   author_name: string;
+  author_avatar_url?: string | null;
   storage_path: string;
   image_url: string;
   caption: string;
