@@ -306,23 +306,27 @@ export async function deleteAlbum(albumID: string) {
 
   const { data: album, error: albumError } = await client
     .from("albums")
-    .select("owner_id")
+    .select("created_by")
     .eq("id", albumID)
     .maybeSingle();
   if (albumError) throw toAppError(albumError, "アルバムを確認できませんでした。");
-  if (!album || album.owner_id !== user.id) {
+  if (!album || album.created_by !== user.id) {
     throw new Error("アルバムを削除できるのはオーナーだけです");
   }
 
-  const { data, error } = await client
+  const { error } = await client
     .from("albums")
     .delete()
-    .eq("id", albumID)
-    .eq("owner_id", user.id)
-    .select("id")
-    .maybeSingle();
+    .eq("id", albumID);
   if (error) throw toAppError(error, "アルバムを削除できませんでした。");
-  if (!data) throw new Error("アルバムを削除できるのはオーナーだけです");
+
+  const { data: remaining, error: verifyError } = await client
+    .from("albums")
+    .select("id")
+    .eq("id", albumID)
+    .maybeSingle();
+  if (verifyError) throw toAppError(verifyError, "削除結果を確認できませんでした。");
+  if (remaining) throw new Error("アルバムを削除できるのはオーナーだけです");
 }
 
 export async function requestAlbumMembership(input: {
