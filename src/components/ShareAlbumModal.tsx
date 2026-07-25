@@ -28,6 +28,15 @@ const INVITABLE_ROLES: Exclude<AlbumRole, "owner">[] = [
   "viewer",
 ];
 
+function isShareCancellation(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    (error as { name?: unknown }).name === "AbortError"
+  );
+}
+
 interface ShareAlbumModalProps {
   album: Album;
   onClose: () => void;
@@ -84,20 +93,24 @@ export function ShareAlbumModal({
 
   const share = async () => {
     const text = `MapAlbum「${album.name}」への招待です。参加にはオーナーまたは管理者の承認が必要です。`;
-    if (navigator.share) {
+    setError("");
+
+    if (typeof navigator.share === "function") {
       try {
         await navigator.share({
           title: `${album.name}への招待`,
           text,
           url: genericInviteURL,
         });
+        onNotice("招待URLを共有しました");
       } catch (caught) {
-        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        if (isShareCancellation(caught)) return;
         setError("共有メニューを開けませんでした。URLをコピーして共有してください。");
       }
       return;
     }
-    await copy(`${text}\n${genericInviteURL}`, "招待URLをコピーしました");
+
+    await copy(genericInviteURL, "招待URLをコピーしました");
   };
 
   const submitEmailInvite = async (event: FormEvent) => {

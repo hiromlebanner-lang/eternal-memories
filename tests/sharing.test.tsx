@@ -80,3 +80,94 @@ it("メンバーには招待発行UIを表示しない", () => {
     screen.getByText(/招待はオーナー・管理者のみ/),
   ).toBeInTheDocument();
 });
+
+it("Web Share APIでiPhoneの標準共有シートを開き成功を通知する", async () => {
+  const user = userEvent.setup();
+  const share = vi.fn().mockResolvedValue(undefined);
+  const onNotice = vi.fn();
+  Object.defineProperty(navigator, "share", {
+    configurable: true,
+    value: share,
+  });
+
+  render(
+    <ShareAlbumModal
+      album={album("owner")}
+      onClose={vi.fn()}
+      onManageMembers={vi.fn()}
+      onNotice={onNotice}
+    />,
+  );
+
+  await user.click(
+    screen.getByRole("button", { name: "招待URLを共有" }),
+  );
+
+  expect(share).toHaveBeenCalledWith({
+    title: `${album().name}への招待`,
+    text: expect.stringContaining("参加にはオーナーまたは管理者の承認"),
+    url: `${window.location.origin}/apps/mapalbum/?join=ABCD1234`,
+  });
+  expect(onNotice).toHaveBeenCalledWith("招待URLを共有しました");
+});
+
+it("標準共有シートのキャンセルではエラーを表示しない", async () => {
+  const user = userEvent.setup();
+  const onNotice = vi.fn();
+  Object.defineProperty(navigator, "share", {
+    configurable: true,
+    value: vi.fn().mockRejectedValue({ name: "AbortError" }),
+  });
+
+  render(
+    <ShareAlbumModal
+      album={album("owner")}
+      onClose={vi.fn()}
+      onManageMembers={vi.fn()}
+      onNotice={onNotice}
+    />,
+  );
+
+  await user.click(
+    screen.getByRole("button", { name: "招待URLを共有" }),
+  );
+
+  expect(screen.queryByRole("alert")).not.toBeInTheDocument();
+  expect(onNotice).not.toHaveBeenCalled();
+});
+
+it("Web Share APIがない端末では招待URLだけをコピーする", async () => {
+  const user = userEvent.setup();
+  const writeText = vi.fn().mockResolvedValue(undefined);
+  const onNotice = vi.fn();
+  Object.defineProperty(navigator, "share", {
+    configurable: true,
+    value: undefined,
+  });
+  Object.defineProperty(navigator, "clipboard", {
+    configurable: true,
+    value: { writeText },
+  });
+  Object.defineProperty(window, "isSecureContext", {
+    configurable: true,
+    value: true,
+  });
+
+  render(
+    <ShareAlbumModal
+      album={album("owner")}
+      onClose={vi.fn()}
+      onManageMembers={vi.fn()}
+      onNotice={onNotice}
+    />,
+  );
+
+  await user.click(
+    screen.getByRole("button", { name: "招待URLを共有" }),
+  );
+
+  expect(writeText).toHaveBeenCalledWith(
+    `${window.location.origin}/apps/mapalbum/?join=ABCD1234`,
+  );
+  expect(onNotice).toHaveBeenCalledWith("招待URLをコピーしました");
+});
