@@ -9,6 +9,7 @@ import type {
   PhotoCategory,
 } from "../types";
 import { compressPhoto } from "./image";
+import { formatErrorMessage, toAppError } from "./errors";
 import { supabase } from "./supabase";
 
 type LoadResult<T> = {
@@ -45,17 +46,6 @@ export async function clearPrivateOfflineData() {
 function requireSupabase() {
   if (!supabase) throw new Error("Supabaseが設定されていません。");
   return supabase;
-}
-
-function toDataError(error: unknown, fallback: string) {
-  if (error instanceof Error) return error;
-  if (typeof error === "object" && error !== null && "message" in error) {
-    const message = (error as { message?: unknown }).message;
-    if (typeof message === "string" && message.trim()) {
-      return new Error(message);
-    }
-  }
-  return new Error(fallback);
 }
 
 export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
@@ -185,7 +175,7 @@ export async function createAlbum(name: string, description: string) {
     error: userError,
   } = await client.auth.getUser();
   if (userError) {
-    throw toDataError(userError, "ログイン状態を確認できませんでした。");
+    throw toAppError(userError, "ログイン状態を確認できませんでした。");
   }
   if (!user) {
     throw new Error("ログインし直してからアルバムを作成してください。");
@@ -194,11 +184,29 @@ export async function createAlbum(name: string, description: string) {
   // INSERT ... RETURNING はSELECTのRLSも同じ文中で評価します。
   // オーナー行はAFTER INSERTトリガーで追加されるため、作成直後のRETURNINGを
   // 避け、INSERTの完了後に別のSELECT文でIDを取得します。
-  const { error: insertError } = await client
+  const {
+    error: insertError,
+    status: insertStatus,
+    statusText: insertStatusText,
+  } = await client
     .from("albums")
     .insert({ name, description });
   if (insertError) {
-    throw toDataError(insertError, "アルバムを作成できませんでした。");
+    const responseLabel = [insertStatus, insertStatusText]
+      .filter(Boolean)
+      .join(" ");
+    const responseError = formatErrorMessage(
+      insertError,
+      "Supabaseからエラー内容が返されませんでした。",
+    );
+    throw new Error(
+      [
+        `albums INSERT${responseLabel ? ` (${responseLabel})` : ""}`,
+        `auth.uid(): ${user.id}`,
+        "owner column: created_by = auth.uid() (database default)",
+        responseError,
+      ].join("\n"),
+    );
   }
 
   const { data, error: selectError } = await client
@@ -210,7 +218,7 @@ export async function createAlbum(name: string, description: string) {
     .limit(1)
     .single();
   if (selectError) {
-    throw toDataError(
+    throw toAppError(
       selectError,
       "作成したアルバムの情報を取得できませんでした。",
     );

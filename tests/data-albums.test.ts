@@ -32,7 +32,7 @@ beforeEach(() => {
     data: { user: { id: "user-1" } },
     error: null,
   });
-  albumInsert.mockResolvedValue({ error: null });
+  albumInsert.mockResolvedValue({ error: null, status: 201, statusText: "Created" });
   albumSelect.mockReturnValue({ eq: albumEqCreator });
   albumEqCreator.mockReturnValue({ eq: albumEqName });
   albumEqName.mockReturnValue({ order: albumOrder });
@@ -67,7 +67,7 @@ describe("アルバム作成", () => {
     });
 
     await expect(createAlbum("夏の旅行", "")).rejects.toThrow(
-      "new row violates row-level security policy",
+      /albums INSERT.*auth\.uid\(\): user-1.*created_by = auth\.uid\(\).*new row violates row-level security policy/s,
     );
   });
 

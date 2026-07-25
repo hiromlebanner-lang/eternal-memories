@@ -25,3 +25,39 @@ it("06 アルバムを作成して入力値を渡す", async () => {
   expect(onCreate).toHaveBeenCalledWith("北海道旅行", "夏の思い出");
   expect(onClose).toHaveBeenCalled();
 });
+
+it("Supabaseの構造化エラーを省略せず表示する", async () => {
+  const user = userEvent.setup();
+  const onCreate = vi.fn(async () => {
+    throw {
+      message: "new row violates row-level security policy",
+      code: "42501",
+      details: "Failing row contains an invalid owner",
+      hint: "Check auth.uid() and created_by",
+    };
+  });
+
+  render(
+    <AlbumManager
+      albums={[]}
+      onClose={vi.fn()}
+      onSelect={vi.fn()}
+      onCreate={onCreate}
+      onJoin={vi.fn(async () => {})}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: /新しいアルバム/ }));
+  await user.type(screen.getByLabelText("アルバム名"), "診断用アルバム");
+  await user.click(screen.getByRole("button", { name: /アルバムを作成/ }));
+
+  expect(
+    await screen.findByText(/new row violates row-level security policy/),
+  ).toHaveTextContent("code: 42501");
+  expect(screen.getByText(/new row violates/)).toHaveTextContent(
+    "details: Failing row contains an invalid owner",
+  );
+  expect(screen.getByText(/new row violates/)).toHaveTextContent(
+    "hint: Check auth.uid() and created_by",
+  );
+});

@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import { useState, type FormEvent } from "react";
 import type { Album } from "../types";
+import { formatErrorMessage } from "../lib/errors";
 import { Modal } from "./Modal";
 
 interface AlbumManagerProps {
@@ -42,7 +43,7 @@ export function AlbumManager({
       await onCreate(name.trim(), description.trim());
       onClose();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "作成できませんでした。");
+      setError(formatErrorMessage(caught, "作成できませんでした。"));
     } finally {
       setBusy(false);
     }
@@ -56,7 +57,7 @@ export function AlbumManager({
       await onJoin(code.trim());
       onClose();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "参加できませんでした。");
+      setError(formatErrorMessage(caught, "参加できませんでした。"));
     } finally {
       setBusy(false);
     }
