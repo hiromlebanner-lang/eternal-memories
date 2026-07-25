@@ -68,7 +68,7 @@ export function AlbumManager({
         action === "create"
           ? "アルバムを作成"
           : action === "join"
-            ? "招待コードで参加"
+            ? "参加を申請"
             : "共有アルバム"
       }
       onClose={onClose}
@@ -115,14 +115,14 @@ export function AlbumManager({
               <Plus size={19} />
               <span>
                 <strong>新しいアルバム</strong>
-                <small>あなたが管理者になります</small>
+                <small>あなたがオーナーになります</small>
               </span>
             </button>
             <button type="button" onClick={() => setAction("join")}>
               <TicketCheck size={19} />
               <span>
-                <strong>招待コードで参加</strong>
-                <small>友だちのアルバムに加わる</small>
+                <strong>招待コードで申請</strong>
+                <small>承認されるとアルバムに参加できます</small>
               </span>
             </button>
           </div>
@@ -165,7 +165,9 @@ export function AlbumManager({
       {action === "join" ? (
         <form className="stack-form" onSubmit={submitJoin}>
           <div className="join-illustration">🎟️</div>
-          <p className="form-intro">受け取った招待コードを入力してください。</p>
+          <p className="form-intro">
+            受け取った招待コードを入力してください。オーナーまたは管理者へ参加申請を送ります。
+          </p>
           <label className="field">
             <span>招待コード</span>
             <input
@@ -180,7 +182,7 @@ export function AlbumManager({
           {error ? <p className="form-message form-message--error">{error}</p> : null}
           <button className="primary-button" type="submit" disabled={busy}>
             <TicketCheck size={18} />
-            {busy ? "参加中…" : "アルバムに参加"}
+            {busy ? "申請中…" : "参加を申請"}
           </button>
           <button className="text-button" type="button" onClick={() => setAction("list")}>
             戻る

@@ -1,6 +1,8 @@
 import { del, get, keys, set } from "idb-keyval";
 import type {
   Album,
+  AlbumInvitation,
+  AlbumJoinRequest,
   AlbumMember,
   AlbumPhoto,
   AlbumRole,
@@ -173,13 +175,51 @@ export async function createAlbum(name: string, description: string) {
   return data.id as string;
 }
 
-export async function joinAlbum(inviteCode: string) {
+export async function requestAlbumMembership(input: {
+  inviteCode?: string;
+  inviteToken?: string;
+}) {
   const client = requireSupabase();
-  const { data, error } = await client.rpc("join_album_by_code", {
-    p_invite_code: inviteCode.trim().toUpperCase(),
+  const { data, error } = await client.rpc("request_album_membership", {
+    p_invite_code: input.inviteCode?.trim().toUpperCase() || null,
+    p_invite_token: input.inviteToken || null,
   });
   if (error) throw error;
   return data as string;
+}
+
+export async function createEmailInvitation(input: {
+  albumID: string;
+  email: string;
+  role: Exclude<AlbumRole, "owner">;
+}): Promise<{
+  invitation: AlbumInvitation;
+  emailSent: boolean;
+  emailError?: string;
+}> {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc("create_album_invitation", {
+    p_album_id: input.albumID,
+    p_email: input.email.trim().toLowerCase(),
+    p_role: input.role,
+  });
+  if (error) throw error;
+
+  const row = (Array.isArray(data) ? data[0] : data) as AlbumInvitation | null;
+  if (!row?.id || !row.token) {
+    throw new Error("招待を作成できませんでした。");
+  }
+
+  const { error: emailError } = await client.functions.invoke(
+    "send-album-invite",
+    { body: { invitationId: row.id } },
+  );
+
+  return {
+    invitation: row,
+    emailSent: !emailError,
+    emailError: emailError?.message,
+  };
 }
 
 export async function uploadPhoto(input: {
@@ -274,16 +314,61 @@ export async function loadMembers(albumID: string): Promise<AlbumMember[]> {
   });
 }
 
+export async function loadJoinRequests(
+  albumID: string,
+): Promise<AlbumJoinRequest[]> {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("album_join_requests")
+    .select(
+      "id, album_id, user_id, invitation_id, requested_role, status, created_at, profiles(display_name, email)",
+    )
+    .eq("album_id", albumID)
+    .eq("status", "pending")
+    .order("created_at");
+  if (error) throw error;
+
+  return (data ?? []).map((row) => {
+    const profile = Array.isArray(row.profiles) ? row.profiles[0] : row.profiles;
+    return {
+      id: row.id,
+      album_id: row.album_id,
+      user_id: row.user_id,
+      invitation_id: row.invitation_id,
+      requested_role: row.requested_role as Exclude<AlbumRole, "owner">,
+      status: row.status as AlbumJoinRequest["status"],
+      created_at: row.created_at,
+      display_name: profile?.display_name ?? "参加希望者",
+      email: profile?.email ?? "",
+    };
+  });
+}
+
+export async function reviewJoinRequest(
+  requestID: string,
+  approve: boolean,
+  role: Exclude<AlbumRole, "owner">,
+) {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc("review_album_join_request", {
+    p_request_id: requestID,
+    p_approve: approve,
+    p_role: role,
+  });
+  if (error) throw error;
+  return data as string;
+}
+
 export async function changeMemberRole(
   albumID: string,
   userID: string,
-  role: AlbumRole,
+  role: Exclude<AlbumRole, "owner">,
 ) {
   const client = requireSupabase();
-  const { error } = await client
-    .from("album_members")
-    .update({ role })
-    .eq("album_id", albumID)
-    .eq("user_id", userID);
+  const { error } = await client.rpc("change_album_member_role", {
+    p_album_id: albumID,
+    p_user_id: userID,
+    p_role: role,
+  });
   if (error) throw error;
 }

@@ -17,6 +17,7 @@ interface PhotoDetailProps {
   photos: AlbumPhoto[];
   initialPhotoID?: string;
   canEdit: (photo: AlbumPhoto) => boolean;
+  canDelete: (photo: AlbumPhoto) => boolean;
   onClose: () => void;
   onEdit: (photo: AlbumPhoto) => void;
   onDelete: (photo: AlbumPhoto) => Promise<void>;
@@ -26,6 +27,7 @@ export function PhotoDetail({
   photos,
   initialPhotoID,
   canEdit,
+  canDelete,
   onClose,
   onEdit,
   onDelete,
@@ -146,21 +148,29 @@ export function PhotoDetail({
             </div>
           </dl>
 
-          {canEdit(photo) ? (
+          {canEdit(photo) || canDelete(photo) ? (
             <div className="photo-detail__actions">
-              <button className="secondary-button" type="button" onClick={() => onEdit(photo)}>
-                <Edit3 size={17} />
-                編集
-              </button>
-              <button
-                className="danger-button"
-                type="button"
-                disabled={deleting}
-                onClick={() => void remove()}
-              >
-                <Trash2 size={17} />
-                {deleting ? "削除中…" : "削除"}
-              </button>
+              {canEdit(photo) ? (
+                <button
+                  className="secondary-button"
+                  type="button"
+                  onClick={() => onEdit(photo)}
+                >
+                  <Edit3 size={17} />
+                  編集
+                </button>
+              ) : null}
+              {canDelete(photo) ? (
+                <button
+                  className="danger-button"
+                  type="button"
+                  disabled={deleting}
+                  onClick={() => void remove()}
+                >
+                  <Trash2 size={17} />
+                  {deleting ? "削除中…" : "削除"}
+                </button>
+              ) : null}
             </div>
           ) : null}
         </div>

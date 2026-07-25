@@ -5,15 +5,12 @@ import {
   ChevronDown,
   CircleUserRound,
   CloudOff,
-  Copy,
   Grid2X2,
   LogOut,
   Map as MapIcon,
   Moon,
   Search,
   Settings,
-  Share2,
-  ShieldCheck,
   Sun,
   UserPlus,
   Wifi,
@@ -22,20 +19,20 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlbumManager } from "./components/AlbumManager";
 import { AuthScreen } from "./components/AuthScreen";
-import { InviteQRCode } from "./components/InviteQRCode";
 import { MapPanel } from "./components/MapPanel";
 import { MemberManager } from "./components/MemberManager";
 import { Modal } from "./components/Modal";
 import { PhotoDetail } from "./components/PhotoDetail";
 import { PhotoEditor } from "./components/PhotoEditor";
 import { PhotoGrid } from "./components/PhotoGrid";
+import { ShareAlbumModal } from "./components/ShareAlbumModal";
 import {
   clearPrivateOfflineData,
   createAlbum,
   deletePhoto,
-  joinAlbum,
   loadAlbums,
   loadPhotos,
+  requestAlbumMembership,
   updatePhoto,
   uploadPhoto,
 } from "./lib/data";
@@ -52,8 +49,11 @@ type ViewMode = "map" | "photos";
 
 function authReturnURL(mode?: "recovery") {
   const url = new URL(window.location.pathname, window.location.origin);
-  const inviteCode = new URLSearchParams(window.location.search).get("join");
+  const query = new URLSearchParams(window.location.search);
+  const inviteCode = query.get("join");
+  const inviteToken = query.get("invite");
   if (inviteCode) url.searchParams.set("join", inviteCode);
+  if (inviteToken) url.searchParams.set("invite", inviteToken);
   if (mode === "recovery") url.searchParams.set("auth", "recovery");
   return url.toString();
 }
@@ -278,9 +278,6 @@ function Dashboard({
   const inviteHandled = useRef(false);
 
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumID);
-  const selectedAlbumInviteURL = selectedAlbum
-    ? `${window.location.origin}/?join=${encodeURIComponent(selectedAlbum.invite_code)}`
-    : "";
 
   const refreshAlbums = useCallback(async () => {
     try {
@@ -325,25 +322,29 @@ function Dashboard({
   }, [refreshPhotos]);
 
   useEffect(() => {
-    const inviteCode = new URLSearchParams(window.location.search).get("join");
-    if (!inviteCode || inviteHandled.current) return;
+    const query = new URLSearchParams(window.location.search);
+    const inviteCode = query.get("join");
+    const inviteToken = query.get("invite");
+    if ((!inviteCode && !inviteToken) || inviteHandled.current) return;
     inviteHandled.current = true;
 
     const acceptInvite = async () => {
       try {
-        const albumID = await joinAlbum(inviteCode);
-        await refreshAlbums();
-        setSelectedAlbumID(albumID);
-        setToast("招待されたアルバムに参加しました");
+        await requestAlbumMembership({
+          inviteCode: inviteCode ?? undefined,
+          inviteToken: inviteToken ?? undefined,
+        });
+        setToast("参加申請を送りました。承認後にアルバムが表示されます");
         const url = new URL(window.location.href);
         url.searchParams.delete("join");
+        url.searchParams.delete("invite");
         window.history.replaceState({}, "", url);
       } catch (caught) {
         setToast(caught instanceof Error ? caught.message : "招待を確認できませんでした。");
       }
     };
     void acceptInvite();
-  }, [refreshAlbums]);
+  }, []);
 
   useEffect(() => {
     const online = () => {
@@ -399,9 +400,17 @@ function Dashboard({
   }, [photos, search]);
 
   const canPost =
-    selectedAlbum?.role === "admin" || selectedAlbum?.role === "editor";
+    selectedAlbum?.role === "owner" ||
+    selectedAlbum?.role === "admin" ||
+    selectedAlbum?.role === "member";
   const canEdit = (photo: AlbumPhoto) =>
-    selectedAlbum?.role === "admin" || photo.author_id === user.id;
+    selectedAlbum?.role === "owner" ||
+    selectedAlbum?.role === "admin" ||
+    (selectedAlbum?.role === "member" && photo.author_id === user.id);
+  const canDelete = (photo: AlbumPhoto) =>
+    selectedAlbum?.role === "owner" ||
+    selectedAlbum?.role === "admin" ||
+    photo.author_id === user.id;
 
   const openPhoto = (photo: AlbumPhoto) => {
     setDetailPhotos([photo]);
@@ -470,25 +479,8 @@ function Dashboard({
   };
 
   const enterAlbum = async (code: string) => {
-    const id = await joinAlbum(code);
-    await refreshAlbums();
-    setSelectedAlbumID(id);
-    setToast("共有アルバムに参加しました");
-  };
-
-  const shareAlbum = async () => {
-    if (!selectedAlbum) return;
-    const message = `MapAlbum「${selectedAlbum.name}」への招待コード: ${selectedAlbum.invite_code}`;
-    if (navigator.share) {
-      await navigator.share({
-        title: selectedAlbum.name,
-        text: message,
-        url: selectedAlbumInviteURL,
-      });
-    } else {
-      await navigator.clipboard.writeText(`${message}\n${selectedAlbumInviteURL}`);
-      setToast("招待リンクをコピーしました");
-    }
+    await requestAlbumMembership({ inviteCode: code });
+    setToast("参加申請を送りました。承認後にアルバムが表示されます");
   };
 
   return (
@@ -690,6 +682,7 @@ function Dashboard({
           photos={detailPhotos}
           initialPhotoID={detailPhotoID}
           canEdit={canEdit}
+          canDelete={canDelete}
           onClose={() => {
             setDetailPhotos([]);
             setDetailPhotoID(undefined);
@@ -704,43 +697,15 @@ function Dashboard({
       ) : null}
 
       {showsShare && selectedAlbum ? (
-        <Modal title="メンバーを招待" onClose={() => setShowsShare(false)}>
-          <div className="share-panel">
-            <div className="share-illustration">💌</div>
-            <h3>{selectedAlbum.name}</h3>
-            <p>このコードか共有リンクを、参加してほしい人へ送ってください。</p>
-            <InviteQRCode value={selectedAlbumInviteURL} />
-            <button
-              type="button"
-              className="invite-code"
-              onClick={async () => {
-                await navigator.clipboard.writeText(selectedAlbum.invite_code);
-                setToast("招待コードをコピーしました");
-              }}
-            >
-              <small>招待コード</small>
-              <strong>{selectedAlbum.invite_code}</strong>
-              <Copy size={18} />
-            </button>
-            <button className="primary-button" type="button" onClick={() => void shareAlbum()}>
-              <Share2 size={18} />
-              招待リンクを共有
-            </button>
-            {selectedAlbum.role === "admin" ? (
-              <button
-                className="secondary-button"
-                type="button"
-                onClick={() => {
-                  setShowsShare(false);
-                  setShowsMembers(true);
-                }}
-              >
-                <ShieldCheck size={18} />
-                メンバーの権限を管理
-              </button>
-            ) : null}
-          </div>
-        </Modal>
+        <ShareAlbumModal
+          album={selectedAlbum}
+          onClose={() => setShowsShare(false)}
+          onNotice={setToast}
+          onManageMembers={() => {
+            setShowsShare(false);
+            setShowsMembers(true);
+          }}
+        />
       ) : null}
 
       {showsMembers && selectedAlbum ? (

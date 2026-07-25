@@ -1,0 +1,2 @@
+[functions.send-album-invite]
+verify_jwt = true

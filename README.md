@@ -13,9 +13,10 @@ React、TypeScript、Vite、Leaflet、Supabaseで作られています。Windows
 - Appleログイン
 - ログイン状態の保持とログアウト
 - 共有アルバムの作成
-- 招待コード・QRコード・共有リンクによる参加
-- 管理者、編集者、閲覧者の権限
-- 管理者によるメンバー権限の変更
+- メールアドレス・招待URL・QRコード・招待コードによる参加申請
+- オーナー／管理者による参加承認・却下
+- オーナー、管理者、メンバー、閲覧のみの4権限
+- オーナー／管理者によるメンバー権限の変更
 - iPhone／Androidからの写真撮影
 - 写真ライブラリからの選択
 - 写真EXIFまたは端末GPSによる撮影位置取得
@@ -25,7 +26,7 @@ React、TypeScript、Vite、Leaflet、Supabaseで作られています。Windows
 - 地図／写真一覧切り替え
 - コメント、投稿者、カテゴリーの検索
 - 写真の編集・削除
-- 投稿者本人または管理者だけが削除可能
+- 投稿者本人、オーナー、管理者だけが削除可能
 - ダークモード
 - PWAインストール
 - 一度表示した地図タイル、写真、アルバム情報のオフライン閲覧
@@ -126,12 +127,14 @@ Supabaseが認証、アルバムデータ、メンバー権限、写真ファイ
 - `albums`
 - `album_members`
 - `photos`
+- `album_invitations`
+- `album_join_requests`
 - 非公開Storageバケット `album-photos`
 - 権限を守るRLSポリシー
-- 招待コード参加用の関数
+- 招待作成、参加申請、承認、権限変更用の安全なRPC
 - 写真更新用Realtime設定
 
-SQLを複数回実行しても主要なテーブルとポリシーは作り直せる構成です。
+SQLは複数回実行できます。再実行時はMapAlbumの旧RLSポリシーを安全側へ作り直し、`album_members.role`、`album_invitations.role`、`album_join_requests.requested_role` の3列を新しい4権限へ統一します。旧版の `editor` は `member`、各アルバムの作成者は `owner` へ移行されます。既存の招待コードはリンク切れを避けて維持され、新しく作るアルバムには推測しにくい16文字のコードが発行されます。
 
 ### 2-3. メールログインを設定
 
@@ -204,7 +207,7 @@ Supabaseで `Project Settings` → `Data API` または `API` を開き、次を
 - Project URL
 - anon / publishable key
 
-`service_role` キーはブラウザーアプリへ絶対に入力しないでください。
+`service_role` キーはブラウザーアプリへ絶対に入力しないでください。招待メール用Edge Functionも呼び出しユーザーのJWTとRLSで動作するため、`service_role` キーを追加設定する必要はありません。
 
 MapAlbumフォルダーで `.env.example` をコピーして `.env.local` を作成します。
 
@@ -255,16 +258,63 @@ https://あなたの独自ドメイン/**
 
 Email Verification、パスワード再設定、Googleログイン、Appleログインはすべてこの許可リストを使用します。ログイン後に別の画面へ移動する場合は、このURL設定を最初に確認してください。
 
-### 2-8. RLSとPrivate Storageを確認
+### 2-8. メールアドレス招待を設定
+
+招待URL、QRコード、招待コードはSQL設定だけで利用できます。画面の「メールアドレスで招待」から実際にメールを送るには、Supabase Edge Functionとメール配信サービスResendを設定します。
+
+1. [Resend](https://resend.com/)でアカウントを作成
+2. 独自ドメインを登録してDNS認証を完了
+3. Resendの `API Keys` で送信用APIキーを作成
+4. MapAlbumフォルダーをPowerShellで開く
+5. Supabase CLIへログインしてプロジェクトを接続
+
+```powershell
+npx supabase login
+npx supabase link --project-ref あなたのSupabaseプロジェクトID
+```
+
+6. Edge Functionだけが使用する秘密情報を登録します
+
+```powershell
+npx supabase secrets set RESEND_API_KEY=re_xxxxxxxxx
+npx supabase secrets set "INVITE_FROM_EMAIL=MapAlbum <invite@認証済みドメイン>"
+npx supabase secrets set APP_URL=https://公開したMapAlbumのURL
+```
+
+`APP_URL` には `https://` から始まる公開済みMapAlbumのURLを指定し、`?` や `#` は付けません。ローカルだけで試す場合は `http://localhost:5173` も使用できます。FunctionはURLのプロトコルを検証し、招待トークン以外のクエリ文字列をメールへ引き継ぎません。
+
+7. 招待メール用Functionを公開します
+
+```powershell
+npx supabase functions deploy send-album-invite
+```
+
+`supabase/config.toml` でJWT検証を有効にしています。Function内でもJWTをSupabase Authへ再確認し、招待、送信先メールアドレス、アルバム名を呼び出しユーザー自身の権限で取得します。`album_invitations` のRLSとメンバー権限の二重確認により、ログイン中のオーナーまたは管理者だけが送信できます。
+
+Resend未設定でも、メール招待の作成後に専用招待URLをコピーして手動送信できます。Resendのテスト用ドメインには送信先制限があるため、家族や友だちへ送る本番運用では独自ドメインを認証してください。
+
+招待の流れ:
+
+1. オーナー／管理者が、メール専用URL、共通の招待URL、QRコード、招待コードのいずれかを共有
+2. 招待された人がメール確認済みアカウントでログインし「参加を申請」
+3. オーナー／管理者の「参加申請とメンバー」に承認待ちとして表示
+4. 承認者が `管理者`、`メンバー`、`閲覧のみ` のいずれかを選んで承認
+5. 申請者が画面を再読み込みすると、初めてアルバムを閲覧可能
+
+メール専用URLは14日間有効で、招待先とSupabase Authの確認済みメールアドレスが一致する場合だけ申請できます。プロフィール画面のメール文字列を書き換えても一致判定には使われません。共通URL、QRコード、招待コードからの申請は初期状態で「メンバー」ですが、承認時に変更できます。どの方法でも、承認前にアルバムや写真を閲覧することはできません。
+
+### 2-9. RLSとPrivate Storageを確認
 
 `supabase/schema.sql` は次の防御を設定します。
 
-- `profiles`、`albums`、`album_members`、`photos` の全テーブルでRLSを有効化
+- `profiles`、`albums`、`album_members`、`photos`、`album_invitations`、`album_join_requests` の全テーブルでRLSを有効化
 - `anon` ロールから全テーブル権限を削除
 - RLSポリシーの対象を `authenticated` のみに限定
 - 同じアルバムに参加していないユーザーのデータを拒否
+- メンバー追加は参加承認RPC、権限変更は権限変更RPCだけに限定
+- メール招待の一致判定にはSupabase Authの確認済みメールを使用
 - `album-photos` StorageバケットをPrivateに固定
-- Storageの閲覧・投稿・削除にもアルバム権限を適用
+- Storageの閲覧・投稿・削除にもアルバム権限を適用し、不正なパス文字列は拒否
 - 写真表示には1時間だけ有効な署名付きURLを使用
 
 SQL Editorで次を実行すると、RLSとStorage設定を確認できます。
@@ -280,7 +330,7 @@ from storage.buckets
 where id = 'album-photos';
 ```
 
-`profiles`、`albums`、`album_members`、`photos` の `rowsecurity` がすべて `true`、`album-photos` の `public` が `false` なら正しく設定されています。
+6テーブルの `rowsecurity` がすべて `true`、`album-photos` の `public` が `false` なら正しく設定されています。
 
 確認後、次のテストを行ってください。
 
@@ -289,6 +339,9 @@ where id = 'album-photos';
 3. パスワード再設定メールから新しいパスワードを登録できる
 4. GoogleとAppleの両方でログインできる
 5. アルバムに参加していない別ユーザーから写真を取得できない
+6. 招待リンクを開いても承認前はアルバムを閲覧できない
+7. オーナー／管理者だけが申請を承認できる
+8. メール専用URLは別メールアドレスのアカウントでは申請できない
 
 公式資料:
 
@@ -298,6 +351,8 @@ where id = 'album-photos';
 - [Appleログイン](https://supabase.com/docs/guides/auth/social-login/auth-apple)
 - [Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)
 - [Storage Access Control](https://supabase.com/docs/guides/storage/security/access-control)
+- [Edge Functions](https://supabase.com/docs/guides/functions)
+- [Edge Functionの環境変数](https://supabase.com/docs/guides/functions/secrets)
 
 ---
 
@@ -439,7 +494,7 @@ PWAは次のデータを端末へキャッシュします。
 - 新しい写真の投稿
 - 編集・削除
 - 新しい場所の地図読み込み
-- メンバー招待と参加
+- メンバー招待、参加申請、承認
 
 日本全体の地図を最初から端末へ保存するものではありません。一度表示した範囲が順次キャッシュされます。
 
@@ -447,16 +502,18 @@ PWAは次のデータを端末へキャッシュします。
 
 ## 権限
 
-| 操作 | 管理者 | 編集者 | 閲覧者 |
-|---|---:|---:|---:|
-| アルバム閲覧 | ○ | ○ | ○ |
-| 写真閲覧 | ○ | ○ | ○ |
-| 写真投稿 | ○ | ○ | × |
-| 自分の写真編集・削除 | ○ | ○ | × |
-| 他人の写真編集・削除 | ○ | × | × |
-| アルバム設定 | ○ | × | × |
+| 操作 | オーナー | 管理者 | メンバー | 閲覧のみ |
+|---|---:|---:|---:|---:|
+| アルバム・写真閲覧 | ○ | ○ | ○ | ○ |
+| 写真投稿 | ○ | ○ | ○ | × |
+| 自分の写真編集 | ○ | ○ | ○ | × |
+| 自分が投稿した写真の削除 | ○ | ○ | ○ | ○ |
+| 他人の写真編集・削除 | ○ | ○ | × | × |
+| 招待・参加承認・権限変更 | ○ | ○ | × | × |
+| アルバム設定 | ○ | ○ | × | × |
+| アルバム削除 | ○ | × | × | × |
 
-権限は画面表示だけでなく、SupabaseのRLSとStorageポリシーでも検証されます。
+オーナーはアルバム作成者に固定され、別の権限へ変更できません。権限は画面表示だけでなく、SupabaseのRLS、RPC、Storageポリシーでも検証されます。
 
 ---
 
@@ -474,7 +531,9 @@ MapAlbumPWA/
 │  ├─ styles.css           Apple風UI・ダークモード
 │  └─ types.ts             データ型
 ├─ supabase/
-│  └─ schema.sql           DB・Storage・権限設定
+│  ├─ functions/           招待メール用Edge Function
+│  ├─ config.toml          FunctionのJWT検証設定
+│  └─ schema.sql           DB・Storage・RLS・承認処理
 ├─ .env.example
 ├─ index.html
 ├─ package.json

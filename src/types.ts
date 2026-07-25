@@ -1,4 +1,4 @@
-export type AlbumRole = "admin" | "editor" | "viewer";
+export type AlbumRole = "owner" | "admin" | "member" | "viewer";
 
 export type PhotoCategory =
   | "scenery"
@@ -33,6 +33,29 @@ export interface AlbumMember {
   user_id: string;
   role: AlbumRole;
   joined_at: string;
+  display_name?: string;
+  email?: string;
+}
+
+export interface AlbumInvitation {
+  id: string;
+  album_id: string;
+  email: string;
+  token: string;
+  role: Exclude<AlbumRole, "owner">;
+  status: "pending" | "accepted" | "rejected" | "revoked";
+  created_at: string;
+  expires_at: string;
+}
+
+export interface AlbumJoinRequest {
+  id: string;
+  album_id: string;
+  user_id: string;
+  invitation_id?: string | null;
+  requested_role: Exclude<AlbumRole, "owner">;
+  status: "pending" | "approved" | "rejected";
+  created_at: string;
   display_name?: string;
   email?: string;
 }
