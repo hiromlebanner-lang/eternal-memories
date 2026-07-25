@@ -330,9 +330,9 @@ export function ShareAlbumModal({
                 <div className="approval-notice" role="note">
                   <ShieldCheck size={19} aria-hidden="true" />
                   <span>
-                    <strong>参加承認制です</strong>
+                    <strong>参加方法は招待方法によって異なります</strong>
                     <small>
-                      招待された人が申請した後、オーナーまたは管理者が承認すると参加できます。
+                      メールで直接招待された人は「参加する」で即時参加できます。共通URL・QR・招待コードは従来どおり参加申請制です。
                     </small>
                   </span>
                 </div>
@@ -425,7 +425,7 @@ export function ShareAlbumModal({
                 <ShieldCheck size={19} aria-hidden="true" />
                 <span>
                   <strong>このアルバムではメンバー招待が許可されています</strong>
-                  <small>招待した相手の参加には管理者の承認が必要です。</small>
+                  <small>メールで直接招待した相手は、本人の承諾だけでメンバーとして参加できます。</small>
                 </span>
               </div>
             )}
@@ -524,7 +524,7 @@ export function ShareAlbumModal({
                   />
                 </label>
                 <label className="field">
-                  <span>承認後の権限</span>
+                  <span>参加時の権限</span>
                   <select
                     value={role}
                     onChange={(event) =>
@@ -564,7 +564,7 @@ export function ShareAlbumModal({
                     </strong>
                     <small>
                       {result.emailSent
-                        ? "相手が申請すると、参加承認の一覧に表示されます。"
+                        ? "相手が「参加する」を押すと、再承認なしでアルバムへ参加します。"
                         : "下の専用URLをコピーして相手へ共有してください。"}
                     </small>
                   </span>
