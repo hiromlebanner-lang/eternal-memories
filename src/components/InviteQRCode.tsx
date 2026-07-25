@@ -43,7 +43,7 @@ export function InviteQRCode({ value }: { value: string }) {
       {status === "ready" && source ? (
         <img
           src={source}
-          alt="アルバムの参加申請用QRコード"
+          alt="アルバム参加用QRコード"
           aria-describedby={captionID}
         />
       ) : null}
@@ -62,7 +62,7 @@ export function InviteQRCode({ value }: { value: string }) {
 
       <figcaption id={captionID}>
         <strong>QRコードで招待</strong>
-        <small>相手のカメラで読み取ると参加申請画面が開きます</small>
+        <small>相手のカメラで読み取ると参加確認画面が開きます</small>
       </figcaption>
     </figure>
   );

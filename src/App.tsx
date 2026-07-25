@@ -1,7 +1,6 @@
 import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
 import {
   Bell,
-  BellOff,
   Images,
   Camera,
   ChevronDown,
@@ -22,7 +21,6 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlbumManager } from "./components/AlbumManager";
 import { AuthScreen } from "./components/AuthScreen";
-import { JoinRequestPopup } from "./components/JoinRequestPopup";
 import { MapPanel } from "./components/MapPanel";
 import { MemberManager } from "./components/MemberManager";
 import { Modal } from "./components/Modal";
@@ -39,9 +37,8 @@ import {
   deletePhoto,
   loadAlbumInviteSettings,
   loadAlbums,
+  loadInviteCodePreview,
   loadMyDirectAlbumInvitations,
-  loadManagedJoinRequests,
-  loadMyPendingJoinRequests,
   loadPhotos,
   requestAlbumMembership,
   respondToDirectAlbumInvitation,
@@ -54,16 +51,8 @@ import {
   canDeletePhoto,
   canEditPhoto,
   canInviteToAlbum,
-  canManageAlbum,
   canPostPhoto,
 } from "./lib/permissions";
-import {
-  isStandalonePWA,
-  loadJoinRequestNotificationPreference,
-  setJoinRequestNotificationsEnabled,
-  showJoinRequestSystemNotification,
-  supportsJoinRequestNotifications,
-} from "./lib/joinNotifications";
 import {
   createNearbyInvitation,
   respondToNearbyInvitation,
@@ -74,7 +63,6 @@ import { CATEGORY_META } from "./types";
 import type {
   Album,
   AlbumInvitation,
-  AlbumJoinRequest,
   AlbumPhoto,
   AppUser,
   NearbyInvitation,
@@ -90,11 +78,8 @@ function authReturnURL(mode?: "recovery") {
   const query = new URLSearchParams(window.location.search);
   const inviteCode = query.get("join");
   const inviteToken = query.get("invite");
-  const manageJoinAlbumID = query.get("manageJoin");
   if (inviteCode) url.searchParams.set("join", inviteCode);
   if (inviteToken) url.searchParams.set("invite", inviteToken);
-  if (manageJoinAlbumID)
-    url.searchParams.set("manageJoin", manageJoinAlbumID);
   if (mode === "recovery") url.searchParams.set("auth", "recovery");
   return url.toString();
 }
@@ -110,28 +95,6 @@ function userFromSupabase(user: User): AppUser {
       "メンバー",
     avatarUrl: user.user_metadata?.avatar_url,
   };
-}
-
-function seenJoinRequestIDs(userID: string) {
-  try {
-    const stored = JSON.parse(
-      localStorage.getItem(`mapalbum:seen-join-requests:${userID}`) ?? "[]",
-    );
-    return new Set<string>(
-      Array.isArray(stored)
-        ? stored.filter((value): value is string => typeof value === "string")
-        : [],
-    );
-  } catch {
-    return new Set<string>();
-  }
-}
-
-function saveSeenJoinRequestIDs(userID: string, ids: ReadonlySet<string>) {
-  localStorage.setItem(
-    `mapalbum:seen-join-requests:${userID}`,
-    JSON.stringify([...ids].slice(-200)),
-  );
 }
 
 function useDarkMode() {
@@ -346,49 +309,25 @@ function Dashboard({
   const [profileBusy, setProfileBusy] = useState(false);
   const cameraAvatarInput = useRef<HTMLInputElement>(null);
   const libraryAvatarInput = useRef<HTMLInputElement>(null);
-  const [pendingJoinCount, setPendingJoinCount] = useState(0);
-  const [managedJoinRequests, setManagedJoinRequests] = useState<
-    AlbumJoinRequest[]
-  >([]);
-  const [joinRequestPopup, setJoinRequestPopup] =
-    useState<AlbumJoinRequest[]>();
+  const [genericInvitation, setGenericInvitation] = useState<{
+    code: string;
+    albumName: string;
+  }>();
   const [directInvitations, setDirectInvitations] = useState<
     AlbumInvitation[]
   >([]);
   const [showsDirectInvitations, setShowsDirectInvitations] = useState(false);
   const [busyDirectInvitationID, setBusyDirectInvitationID] =
     useState<string>();
-  const [joinNotificationsEnabled, setJoinNotificationsEnabledState] =
-    useState(false);
-  const [notificationBusy, setNotificationBusy] = useState(true);
   const [busyNearbyUserID, setBusyNearbyUserID] = useState<string>();
   const [busyNearbyInvitationID, setBusyNearbyInvitationID] =
     useState<string>();
   const inviteHandled = useRef(false);
-  const seenManagerRequestIDs = useRef(seenJoinRequestIDs(user.id));
 
   useEffect(() => {
     setUser(sessionUser);
     setProfileName(sessionUser.displayName);
   }, [sessionUser]);
-
-  useEffect(() => {
-    let active = true;
-    setNotificationBusy(true);
-    void loadJoinRequestNotificationPreference()
-      .then((enabled) => {
-        if (active) setJoinNotificationsEnabledState(enabled);
-      })
-      .catch(() => {
-        if (active) setToast("通知設定を確認できませんでした");
-      })
-      .finally(() => {
-        if (active) setNotificationBusy(false);
-      });
-    return () => {
-      active = false;
-    };
-  }, [user.id]);
 
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumID);
   const canInviteNearby = Boolean(
@@ -403,90 +342,10 @@ function Dashboard({
     selectedAlbumID: selectedAlbum?.id,
     canInvite: canInviteNearby,
   });
-  const managedAlbumIDs = useMemo(
-    () =>
-      new Set(
-        albums
-          .filter((album) => canManageAlbum(album.role))
-          .map((album) => album.id),
-      ),
-    [albums],
-  );
-  const joinRequestCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const request of managedJoinRequests) {
-      counts.set(request.album_id, (counts.get(request.album_id) ?? 0) + 1);
-    }
-    return counts;
-  }, [managedJoinRequests]);
-  const selectedJoinRequestCount = selectedAlbum
-    ? (joinRequestCounts.get(selectedAlbum.id) ?? 0)
-    : 0;
-
-  const showUnseenJoinRequests = useCallback(
-    (requests: AlbumJoinRequest[], preferredRequestID?: string) => {
-      const unseen = requests.filter(
-        (request) => !seenManagerRequestIDs.current.has(request.id),
-      );
-      if (unseen.length === 0) return;
-
-      const preferred = preferredRequestID
-        ? unseen.find((request) => request.id === preferredRequestID)
-        : undefined;
-      const notificationRequests = preferred ? [preferred] : unseen;
-      for (const request of notificationRequests) {
-        seenManagerRequestIDs.current.add(request.id);
-      }
-      saveSeenJoinRequestIDs(user.id, seenManagerRequestIDs.current);
-      setJoinRequestPopup(notificationRequests);
-
-      const first = notificationRequests[0];
-      const body =
-        notificationRequests.length === 1
-          ? `${first.display_name || "参加希望者"}さんから「${
-              first.album_name || "アルバム"
-            }」への参加申請が届きました`
-          : `参加申請が${notificationRequests.length}件届いています`;
-      void showJoinRequestSystemNotification({
-        title: "MapAlbumに参加申請が届きました",
-        body,
-        tag:
-          notificationRequests.length === 1
-            ? `join-request-${first.id}`
-            : "join-request-summary",
-        albumID:
-          notificationRequests.length === 1 ? first.album_id : undefined,
-      });
-    },
-    [user.id],
-  );
-
-  const refreshManagedJoinRequests = useCallback(
-    async (options?: {
-      notify?: boolean;
-      preferredRequestID?: string;
-    }) => {
-      try {
-        const requests = await loadManagedJoinRequests(albums);
-        setManagedJoinRequests(requests);
-        if (options?.notify) {
-          showUnseenJoinRequests(requests, options.preferredRequestID);
-        }
-      } catch {
-        setManagedJoinRequests([]);
-      }
-    },
-    [albums, showUnseenJoinRequests],
-  );
-
   const refreshAlbums = useCallback(async () => {
     try {
-      const [result, pendingRequests] = await Promise.all([
-        loadAlbums(user.id),
-        loadMyPendingJoinRequests(user.id),
-      ]);
+      const result = await loadAlbums(user.id);
       setAlbums(result.data);
-      setPendingJoinCount(pendingRequests.length);
       setUsingCache(result.fromCache);
       setSelectedAlbumID((current) =>
         result.data.some((album) => album.id === current)
@@ -541,46 +400,6 @@ function Dashboard({
   }, [refreshDirectInvitations]);
 
   useEffect(() => {
-    void refreshManagedJoinRequests({ notify: true });
-  }, [refreshManagedJoinRequests]);
-
-  useEffect(() => {
-    const targetAlbumID = new URLSearchParams(window.location.search).get(
-      "manageJoin",
-    );
-    if (!targetAlbumID || albums.length === 0) return;
-
-    const target = albums.find(
-      (album) =>
-        album.id === targetAlbumID &&
-        (album.role === "owner" || album.role === "admin"),
-    );
-    const url = new URL(window.location.href);
-    url.searchParams.delete("manageJoin");
-    window.history.replaceState({}, "", url);
-    if (!target) {
-      setToast("この参加申請を管理する権限がありません。");
-      return;
-    }
-    setSelectedAlbumID(target.id);
-    setShowsMembers(true);
-  }, [albums]);
-
-  useEffect(() => {
-    const checkOnReturn = () => {
-      if (document.visibilityState === "visible") {
-        void refreshManagedJoinRequests({ notify: true });
-      }
-    };
-    document.addEventListener("visibilitychange", checkOnReturn);
-    window.addEventListener("pageshow", checkOnReturn);
-    return () => {
-      document.removeEventListener("visibilitychange", checkOnReturn);
-      window.removeEventListener("pageshow", checkOnReturn);
-    };
-  }, [refreshManagedJoinRequests]);
-
-  useEffect(() => {
     void refreshPhotos();
   }, [refreshPhotos]);
 
@@ -600,14 +419,13 @@ function Dashboard({
           window.history.replaceState({}, "", url);
           return;
         }
-        await requestAlbumMembership({
-          inviteCode: inviteCode ?? undefined,
+        const preview = await loadInviteCodePreview(inviteCode ?? "");
+        setGenericInvitation({
+          code: inviteCode ?? "",
+          albumName: preview.album_name,
         });
-        setPendingJoinCount((current) => current + 1);
-        setToast("参加申請を送りました。オーナーの承認をお待ちください");
         const url = new URL(window.location.href);
         url.searchParams.delete("join");
-        url.searchParams.delete("invite");
         window.history.replaceState({}, "", url);
       } catch (caught) {
         setToast(caught instanceof Error ? caught.message : "招待を確認できませんでした。");
@@ -667,76 +485,11 @@ function Dashboard({
         },
         () => void refreshAlbums(),
       )
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: "album_join_requests",
-          filter: `user_id=eq.${user.id}`,
-        },
-        () => void refreshAlbums(),
-      )
       .subscribe();
     return () => {
       void client.removeChannel(membershipChannel);
     };
   }, [refreshAlbums, user.id]);
-
-  useEffect(() => {
-    if (!supabase || managedAlbumIDs.size === 0) return;
-    const client = supabase;
-    const managerRequestChannel = client
-      .channel(`manager-join-requests:${user.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "INSERT",
-          schema: "public",
-          table: "album_join_requests",
-        },
-        (payload) => {
-          const request = payload.new as {
-            id?: string;
-            album_id?: string;
-            status?: string;
-          };
-          if (
-            request.id &&
-            request.album_id &&
-            request.status === "pending" &&
-            managedAlbumIDs.has(request.album_id)
-          ) {
-            void refreshManagedJoinRequests({
-              notify: true,
-              preferredRequestID: request.id,
-            });
-          }
-        },
-      )
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "album_join_requests",
-        },
-        (payload) => {
-          const request = payload.new as { album_id?: string };
-          if (request.album_id && managedAlbumIDs.has(request.album_id)) {
-            void refreshManagedJoinRequests();
-          }
-        },
-      )
-      .subscribe();
-    return () => {
-      void client.removeChannel(managerRequestChannel);
-    };
-  }, [
-    managedAlbumIDs,
-    refreshManagedJoinRequests,
-    user.id,
-  ]);
 
   useEffect(() => {
     if (!toast) return;
@@ -894,9 +647,27 @@ function Dashboard({
   };
 
   const enterAlbum = async (code: string) => {
-    await requestAlbumMembership({ inviteCode: code });
-    setPendingJoinCount((current) => current + 1);
-    setToast("参加申請を送りました。オーナーの承認をお待ちください");
+    const albumID = await requestAlbumMembership({ inviteCode: code });
+    await refreshAlbums();
+    setSelectedAlbumID(albumID);
+    setToast("アルバムに参加しました");
+  };
+
+  const acceptGenericInvitation = async () => {
+    if (!genericInvitation) return;
+    try {
+      const albumID = await requestAlbumMembership({
+        inviteCode: genericInvitation.code,
+      });
+      setGenericInvitation(undefined);
+      await refreshAlbums();
+      setSelectedAlbumID(albumID);
+      setToast("アルバムに参加しました");
+    } catch (caught) {
+      setToast(
+        caught instanceof Error ? caught.message : "アルバムに参加できませんでした。",
+      );
+    }
   };
 
   const openShare = async () => {
@@ -1004,29 +775,6 @@ function Dashboard({
     }
   };
 
-  const toggleJoinNotifications = async () => {
-    const nextEnabled = !joinNotificationsEnabled;
-    setNotificationBusy(true);
-    try {
-      const enabled =
-        await setJoinRequestNotificationsEnabled(nextEnabled);
-      setJoinNotificationsEnabledState(enabled);
-      setToast(
-        enabled
-          ? "参加申請のシステム通知をONにしました"
-          : "参加申請のシステム通知をOFFにしました",
-      );
-    } catch (caught) {
-      setToast(
-        caught instanceof Error
-          ? caught.message
-          : "通知設定を変更できませんでした。",
-      );
-    } finally {
-      setNotificationBusy(false);
-    }
-  };
-
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -1071,20 +819,9 @@ function Dashboard({
               className="icon-button header-invite-button"
               type="button"
               onClick={() => void openShare()}
-              aria-label={
-                selectedJoinRequestCount > 0
-                  ? `共有・参加申請 ${selectedJoinRequestCount}件`
-                  : "共有"
-              }
+              aria-label="共有"
             >
               <UserPlus size={20} />
-              {selectedJoinRequestCount > 0 ? (
-                <span className="notification-badge">
-                  {selectedJoinRequestCount > 99
-                    ? "99+"
-                    : selectedJoinRequestCount}
-                </span>
-              ) : null}
             </button>
           ) : null}
           <button
@@ -1110,13 +847,6 @@ function Dashboard({
             : "一部のデータを端末キャッシュから表示しています。"}
         </div>
       )}
-
-      {pendingJoinCount > 0 ? (
-        <div className="offline-banner" role="status">
-          <CircleUserRound size={15} />
-          {pendingJoinCount}件のアルバムが参加承認待ちです。
-        </div>
-      ) : null}
 
       <main className="app-main">
         {selectedAlbum ? (
@@ -1293,9 +1023,6 @@ function Dashboard({
           }}
           onNotice={setToast}
           onSettingsChanged={refreshAlbums}
-          pendingJoinRequestCount={
-            joinRequestCounts.get(sharingAlbum.id) ?? 0
-          }
           onManageMembers={() => {
             setShowsShare(false);
             setShowsMembers(true);
@@ -1308,27 +1035,39 @@ function Dashboard({
           album={selectedAlbum}
           currentUser={user}
           onClose={() => setShowsMembers(false)}
-          onChanged={async () => {
-            await Promise.all([
-              refreshAlbums(),
-              refreshManagedJoinRequests(),
-            ]);
-          }}
+          onChanged={refreshAlbums}
         />
       ) : null}
 
-      {joinRequestPopup?.length ? (
-        <JoinRequestPopup
-          requests={joinRequestPopup}
-          onLater={() => setJoinRequestPopup(undefined)}
-          onView={() => {
-            const targetAlbumID = joinRequestPopup[0]?.album_id;
-            if (targetAlbumID) setSelectedAlbumID(targetAlbumID);
-            setJoinRequestPopup(undefined);
-            setShowsShare(false);
-            setShowsMembers(true);
-          }}
-        />
+      {genericInvitation ? (
+        <Modal
+          title="アルバムへの招待"
+          onClose={() => setGenericInvitation(undefined)}
+        >
+          <div className="join-request-popup">
+            <Bell size={28} aria-hidden="true" />
+            <p>
+              「{genericInvitation.albumName}」へ招待されました。
+              参加しますか？
+            </p>
+            <div className="join-request-popup__actions">
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => void acceptGenericInvitation()}
+              >
+                参加する
+              </button>
+              <button
+                className="secondary-button"
+                type="button"
+                onClick={() => setGenericInvitation(undefined)}
+              >
+                参加しない
+              </button>
+            </div>
+          </div>
+        </Modal>
       ) : null}
 
       {showsDirectInvitations && directInvitations.length > 0 ? (
@@ -1423,35 +1162,6 @@ function Dashboard({
                 <small>一度表示した地図と写真を自動保存</small>
               </span>
             </div>
-            <button
-              type="button"
-              className="settings-row"
-              role="switch"
-              aria-checked={joinNotificationsEnabled}
-              disabled={notificationBusy}
-              onClick={() => void toggleJoinNotifications()}
-            >
-              {supportsJoinRequestNotifications() ? (
-                <Bell size={19} />
-              ) : (
-                <BellOff size={19} />
-              )}
-              <span>
-                <strong>参加申請の通知を受け取る</strong>
-                <small>
-                  {supportsJoinRequestNotifications()
-                    ? isStandalonePWA()
-                      ? "ホーム画面PWAへPush通知します。アプリ内通知は常に有効です"
-                      : "iPhoneはホーム画面へ追加後にONにしてください。アプリ内通知は常に有効です"
-                    : "この端末はPush非対応です。アプリ内通知は常に有効です"}
-                </small>
-              </span>
-              <span
-                className={
-                  joinNotificationsEnabled ? "toggle is-on" : "toggle"
-                }
-              />
-            </button>
             <NearbyPeopleSettings
               enabled={nearby.enabled}
               status={nearby.status}

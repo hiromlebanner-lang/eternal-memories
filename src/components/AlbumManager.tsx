@@ -206,7 +206,7 @@ export function AlbumManager({
         <form className="stack-form" onSubmit={submitJoin}>
           <div className="join-illustration">🎟️</div>
           <p className="form-intro">
-            受け取った招待コードを入力してください。オーナーまたは管理者へ参加申請を送ります。
+            受け取った招待コードを入力し、アルバムへ参加してください。
           </p>
           <label className="field">
             <span>招待コード</span>
@@ -222,7 +222,7 @@ export function AlbumManager({
           {error ? <p className="form-message form-message--error">{error}</p> : null}
           <button className="primary-button" type="submit" disabled={busy}>
             <TicketCheck size={18} />
-            {busy ? "申請中…" : "参加を申請"}
+            {busy ? "参加中…" : "参加する"}
           </button>
           <button className="text-button" type="button" onClick={() => setAction("list")}>
             戻る

@@ -54,7 +54,7 @@ function invitationStatus(invitation: AlbumInvitation, now: number) {
   )
     return "期限切れ";
   return {
-    pending: "承認待ち",
+    pending: "回答待ち",
     accepted: "参加済み",
     rejected: "辞退",
     revoked: "無効",
@@ -66,7 +66,6 @@ interface ShareAlbumModalProps {
   onClose: () => void;
   onManageMembers: () => void;
   onNotice: (message: string) => void;
-  pendingJoinRequestCount?: number;
   onSettingsChanged?: () => void | Promise<void>;
 }
 
@@ -81,7 +80,6 @@ export function ShareAlbumModal({
   onClose,
   onManageMembers,
   onNotice,
-  pendingJoinRequestCount = 0,
   onSettingsChanged,
 }: ShareAlbumModalProps) {
   const [email, setEmail] = useState("");
@@ -204,7 +202,7 @@ export function ShareAlbumModal({
   };
 
   const share = async () => {
-    const text = `MapAlbum「${album.name}」への招待です。参加にはオーナーまたは管理者の承認が必要です。`;
+    const text = `MapAlbum「${album.name}」への招待です。リンクを開いて参加するか選択してください。`;
     setError("");
 
     if (typeof navigator.share === "function") {
@@ -297,11 +295,7 @@ export function ShareAlbumModal({
               <>
                 <button
                   type="button"
-                  className={
-                    pendingJoinRequestCount > 0
-                      ? "join-request-shortcut has-requests"
-                      : "join-request-shortcut"
-                  }
+                  className="join-request-shortcut"
                   onClick={onManageMembers}
                 >
                   <span
@@ -311,28 +305,17 @@ export function ShareAlbumModal({
                     <Clock3 size={20} />
                   </span>
                   <span>
-                    <strong>参加申請 {pendingJoinRequestCount}件</strong>
-                    <small>
-                      {pendingJoinRequestCount > 0
-                        ? "承認または拒否する申請があります"
-                        : "現在、参加申請はありません"}
-                    </small>
+                    <strong>メンバー管理</strong>
+                    <small>参加中のメンバーと権限を確認します</small>
                   </span>
-                  {pendingJoinRequestCount > 0 ? (
-                    <span className="join-request-shortcut__count">
-                      {pendingJoinRequestCount > 99
-                        ? "99+"
-                        : pendingJoinRequestCount}
-                    </span>
-                  ) : null}
                 </button>
 
                 <div className="approval-notice" role="note">
                   <ShieldCheck size={19} aria-hidden="true" />
                   <span>
-                    <strong>参加方法は招待方法によって異なります</strong>
+                    <strong>参加の再承認は不要です</strong>
                     <small>
-                      メールで直接招待された人は「参加する」で即時参加できます。共通URL・QR・招待コードは従来どおり参加申請制です。
+                      メール・URL・QR・招待コードのどれでも、招待された人が「参加する」を選ぶとすぐ参加できます。
                     </small>
                   </span>
                 </div>
@@ -446,7 +429,7 @@ export function ShareAlbumModal({
               </div>
 
               <label className="invite-link-field">
-                <span className="share-sr-only">参加申請用URL</span>
+                <span className="share-sr-only">アルバム参加用URL</span>
                 <span className="invite-link-row">
                   <input
                     className="invite-link-input"
@@ -469,7 +452,7 @@ export function ShareAlbumModal({
                 </span>
               </label>
               <small id="invite-link-help" className="share-section__help">
-                URLを受け取った人は、ログイン後に参加申請できます。
+                URLを受け取った人は、ログイン後に参加するか選択できます。
               </small>
 
               <button

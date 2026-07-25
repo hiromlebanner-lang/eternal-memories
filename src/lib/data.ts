@@ -440,6 +440,22 @@ export async function requestAlbumMembership(input: {
   return data as string;
 }
 
+export async function loadInviteCodePreview(inviteCode: string) {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc("get_album_invite_preview", {
+    p_invite_code: inviteCode.trim().toUpperCase(),
+  });
+  if (error) {
+    throw toAppError(error, "招待情報を取得できませんでした。");
+  }
+  const row = (Array.isArray(data) ? data[0] : data) as {
+    album_id: string;
+    album_name: string;
+  } | null;
+  if (!row?.album_id) throw new Error("招待情報を取得できませんでした。");
+  return row;
+}
+
 export async function createEmailInvitation(input: {
   albumID: string;
   email: string;
