@@ -193,6 +193,29 @@ it("招待を許可された一般メンバーは対象アルバムを共有で�
   expect(screen.getByLabelText("承認後の権限")).toHaveValue("member");
 });
 
+it("設定RPC未適用でも基本の招待URL・QR・コードを表示する", () => {
+  render(
+    <ShareAlbumModal
+      album={{
+        ...album("owner"),
+        invite_settings_supported: false,
+        invite_code_expires_at: "2099-12-31T23:59:59.999Z",
+      }}
+      onClose={vi.fn()}
+      onManageMembers={vi.fn()}
+      onNotice={vi.fn()}
+    />,
+  );
+
+  expect(screen.getByText("基本の招待機能を利用中です")).toBeInTheDocument();
+  expect(screen.queryByText("このアルバムの招待設定")).not.toBeInTheDocument();
+  expect(screen.getByText("招待URL")).toBeInTheDocument();
+  expect(screen.getByTestId("qr-code")).toBeInTheDocument();
+  expect(
+    screen.getByRole("button", { name: /招待コード/ }),
+  ).toBeEnabled();
+});
+
 it("Web Share APIでiPhoneの標準共有シートを開き成功を通知する", async () => {
   const user = userEvent.setup();
   const share = vi.fn().mockResolvedValue(undefined);

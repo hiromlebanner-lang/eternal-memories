@@ -787,6 +787,8 @@ function Dashboard({
         invite_code_expires_at: inviteSettings.invite_code_expires_at,
         members_can_invite: inviteSettings.members_can_invite,
         can_invite: inviteSettings.can_invite,
+        invite_settings_supported:
+          inviteSettings.supports_advanced_settings,
       });
       setShowsShare(true);
     } catch (caught) {

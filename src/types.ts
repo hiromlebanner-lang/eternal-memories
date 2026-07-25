@@ -27,6 +27,7 @@ export interface Album {
   can_invite?: boolean;
   invite_code_enabled?: boolean;
   invite_code_expires_at?: string;
+  invite_settings_supported?: boolean;
   cover_url?: string | null;
   role: AlbumRole;
   photo_count?: number;
@@ -40,6 +41,7 @@ export interface AlbumInviteSettings {
   members_can_invite: boolean;
   can_manage: boolean;
   can_invite: boolean;
+  supports_advanced_settings: boolean;
 }
 
 export interface AlbumMember {

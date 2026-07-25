@@ -49,22 +49,67 @@ function requireSupabase() {
   return supabase;
 }
 
+function supabaseErrorCode(error: unknown) {
+  if (typeof error !== "object" || error === null || !("code" in error)) {
+    return "";
+  }
+  return typeof error.code === "string" ? error.code : "";
+}
+
+function supabaseErrorMessage(error: unknown) {
+  if (typeof error !== "object" || error === null || !("message" in error)) {
+    return "";
+  }
+  return typeof error.message === "string" ? error.message : "";
+}
+
+function isMissingColumnError(error: unknown) {
+  return (
+    supabaseErrorCode(error) === "42703" &&
+    /owner_id|members_can_invite|invite_code_enabled|invite_code_expires_at/i.test(
+      supabaseErrorMessage(error),
+    )
+  );
+}
+
+function isMissingRPCError(error: unknown, functionName: string) {
+  return (
+    supabaseErrorCode(error) === "PGRST202" &&
+    supabaseErrorMessage(error).includes(functionName)
+  );
+}
+
 export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
   const client = requireSupabase();
 
   try {
+    const loadAlbumRows = async () => {
+      const current = await client
+        .from("albums")
+        .select(
+          "id, name, description, owner_id, created_by, created_at, members_can_invite",
+        )
+        .order("created_at", { ascending: false });
+
+      if (!current.error || !isMissingColumnError(current.error)) {
+        return current;
+      }
+
+      // 20260725 migration適用前の既存環境でも、基本の招待コードを
+      // 利用できるように従来カラムだけで再取得する。
+      return client
+        .from("albums")
+        .select("id, name, description, created_by, created_at")
+        .order("created_at", { ascending: false });
+    };
+
     const [
       { data: albumRows, error: albumError },
       { data: membershipRows, error: membershipError },
       { data: photoRows },
       { data: memberRows },
     ] = await Promise.all([
-      client
-        .from("albums")
-        .select(
-          "id, name, description, owner_id, created_by, created_at, members_can_invite",
-        )
-        .order("created_at", { ascending: false }),
+      loadAlbumRows(),
       client
         .from("album_members")
         .select("album_id, role")
@@ -95,25 +140,35 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
     const albums = (albumRows ?? [])
       .filter((album) => roleByAlbum.has(album.id))
       .map(
-        (album): Album => ({
-          id: album.id,
-          name: album.name,
-          description: album.description ?? "",
-          invite_code: "",
-          created_by: album.created_by,
-          owner_id: album.owner_id,
-          created_at: album.created_at,
-          members_can_invite: album.members_can_invite ?? false,
-          can_invite:
-            roleByAlbum.get(album.id) === "owner" ||
-            roleByAlbum.get(album.id) === "admin" ||
-            (roleByAlbum.get(album.id) === "member" &&
-              Boolean(album.members_can_invite)),
-          cover_url: null,
-          role: roleByAlbum.get(album.id) ?? "viewer",
-          photo_count: photoCounts.get(album.id) ?? 0,
-          member_count: memberCounts.get(album.id) ?? 1,
-        }),
+        (album): Album => {
+          const ownerID =
+            "owner_id" in album && typeof album.owner_id === "string"
+              ? album.owner_id
+              : album.created_by;
+          const membersCanInvite =
+            "members_can_invite" in album &&
+            Boolean(album.members_can_invite);
+          const role = roleByAlbum.get(album.id) ?? "viewer";
+
+          return {
+            id: album.id,
+            name: album.name,
+            description: album.description ?? "",
+            invite_code: "",
+            created_by: album.created_by,
+            owner_id: ownerID,
+            created_at: album.created_at,
+            members_can_invite: membersCanInvite,
+            can_invite:
+              role === "owner" ||
+              role === "admin" ||
+              (role === "member" && membersCanInvite),
+            cover_url: null,
+            role,
+            photo_count: photoCounts.get(album.id) ?? 0,
+            member_count: memberCounts.get(album.id) ?? 1,
+          };
+        },
       );
 
     await set(albumCacheKey(userID), albums);
@@ -248,7 +303,9 @@ export async function requestAlbumMembership(input: {
     p_invite_code: input.inviteCode?.trim().toUpperCase() || null,
     p_invite_token: input.inviteToken || null,
   });
-  if (error) throw error;
+  if (error) {
+    throw toAppError(error, "招待を確認できませんでした。");
+  }
   return data as string;
 }
 
@@ -267,7 +324,9 @@ export async function createEmailInvitation(input: {
     p_email: input.email.trim().toLowerCase(),
     p_role: input.role,
   });
-  if (error) throw error;
+  if (error) {
+    throw toAppError(error, "招待を作成できませんでした。");
+  }
 
   const row = (Array.isArray(data) ? data[0] : data) as AlbumInvitation | null;
   if (!row?.id || !row.token) {
@@ -291,7 +350,9 @@ export async function loadAlbumInviteCode(albumID: string) {
   const { data, error } = await client.rpc("get_album_invite_code", {
     p_album_id: albumID,
   });
-  if (error) throw error;
+  if (error) {
+    throw toAppError(error, "招待コードを取得できませんでした。");
+  }
   if (typeof data !== "string" || !data) {
     throw new Error("招待コードを取得できませんでした。");
   }
@@ -305,14 +366,31 @@ export async function loadAlbumInviteSettings(
   const { data, error } = await client.rpc("get_album_invite_settings", {
     p_album_id: albumID,
   });
-  if (error) throw error;
+  if (error && isMissingRPCError(error, "get_album_invite_settings")) {
+    const inviteCode = await loadAlbumInviteCode(albumID);
+    return {
+      invite_code: inviteCode,
+      invite_code_enabled: true,
+      invite_code_expires_at: "2099-12-31T23:59:59.999Z",
+      members_can_invite: false,
+      can_manage: true,
+      can_invite: true,
+      supports_advanced_settings: false,
+    };
+  }
+  if (error) {
+    throw toAppError(error, "招待情報を取得できませんでした。");
+  }
   const row = (Array.isArray(data) ? data[0] : data) as
-    | AlbumInviteSettings
+    | Omit<AlbumInviteSettings, "supports_advanced_settings">
     | null;
   if (!row?.invite_code) {
     throw new Error("招待設定を取得できませんでした。");
   }
-  return row;
+  return {
+    ...row,
+    supports_advanced_settings: true,
+  };
 }
 
 export async function updateAlbumInviteSettings(input: {
@@ -328,7 +406,9 @@ export async function updateAlbumInviteSettings(input: {
     p_invite_code_enabled: input.enabled,
     p_invite_code_expires_at: input.expiresAt,
   });
-  if (error) throw error;
+  if (error) {
+    throw toAppError(error, "招待設定を保存できませんでした。");
+  }
 }
 
 export async function rotateAlbumInviteCode(
@@ -340,7 +420,9 @@ export async function rotateAlbumInviteCode(
     p_album_id: albumID,
     p_expires_at: expiresAt,
   });
-  if (error) throw error;
+  if (error) {
+    throw toAppError(error, "招待コードを再発行できませんでした。");
+  }
   if (typeof data !== "string" || !data) {
     throw new Error("招待コードを再発行できませんでした。");
   }

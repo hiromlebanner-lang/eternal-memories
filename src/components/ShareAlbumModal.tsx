@@ -80,6 +80,8 @@ export function ShareAlbumModal({
   const [error, setError] = useState("");
   const isManager = album.role === "owner" || album.role === "admin";
   const canInvite = isManager || Boolean(album.can_invite);
+  const supportsAdvancedInviteSettings =
+    album.invite_settings_supported !== false;
   const [inviteCode, setInviteCode] = useState(album.invite_code);
   const [membersCanInvite, setMembersCanInvite] = useState(
     Boolean(album.members_can_invite),
@@ -284,74 +286,88 @@ export function ShareAlbumModal({
                   </span>
                 </div>
 
-                <section
-                  className="share-section invite-settings"
-                  aria-labelledby="invite-settings-heading"
-                >
-                  <div className="section-heading">
-                    <CalendarDays size={18} aria-hidden="true" />
-                    <strong id="invite-settings-heading">
-                      このアルバムの招待設定
-                    </strong>
-                  </div>
-                  <label className="invite-setting-toggle">
+                {supportsAdvancedInviteSettings ? (
+                  <section
+                    className="share-section invite-settings"
+                    aria-labelledby="invite-settings-heading"
+                  >
+                    <div className="section-heading">
+                      <CalendarDays size={18} aria-hidden="true" />
+                      <strong id="invite-settings-heading">
+                        このアルバムの招待設定
+                      </strong>
+                    </div>
+                    <label className="invite-setting-toggle">
+                      <span>
+                        <strong>一般メンバーの招待を許可</strong>
+                        <small>初期値はOFFです。閲覧のみの人は招待できません。</small>
+                      </span>
+                      <input
+                        type="checkbox"
+                        aria-label="一般メンバーの招待を許可"
+                        checked={membersCanInvite}
+                        onChange={(event) =>
+                          setMembersCanInvite(event.target.checked)
+                        }
+                        disabled={settingsBusy}
+                      />
+                    </label>
+                    <label className="field">
+                      <span>招待コードの有効期限</span>
+                      <input
+                        type="datetime-local"
+                        value={expiresAt}
+                        onChange={(event) => setExpiresAt(event.target.value)}
+                        disabled={settingsBusy}
+                      />
+                    </label>
+                    <label className="invite-setting-toggle">
+                      <span>
+                        <strong>招待コードを有効にする</strong>
+                        <small>OFFにすると現在のURL・QR・コードを停止します。</small>
+                      </span>
+                      <input
+                        type="checkbox"
+                        aria-label="招待コードを有効にする"
+                        checked={codeEnabled}
+                        onChange={(event) =>
+                          setCodeEnabled(event.target.checked)
+                        }
+                        disabled={settingsBusy}
+                      />
+                    </label>
+                    <div className="invite-settings__actions">
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={settingsBusy}
+                        onClick={() => void saveInviteSettings()}
+                      >
+                        <Save size={17} aria-hidden="true" />
+                        設定を保存
+                      </button>
+                      <button
+                        type="button"
+                        className="text-button"
+                        disabled={settingsBusy}
+                        onClick={() => void rotateInviteCode()}
+                      >
+                        <RefreshCw size={16} aria-hidden="true" />
+                        古いコードを無効化して再発行
+                      </button>
+                    </div>
+                  </section>
+                ) : (
+                  <div className="approval-notice" role="note">
+                    <ShieldCheck size={19} aria-hidden="true" />
                     <span>
-                      <strong>一般メンバーの招待を許可</strong>
-                      <small>初期値はOFFです。閲覧のみの人は招待できません。</small>
+                      <strong>基本の招待機能を利用中です</strong>
+                      <small>
+                        URL・QR・招待コードは利用できます。期限設定とコード再発行はデータベース更新後に利用できます。
+                      </small>
                     </span>
-                    <input
-                      type="checkbox"
-                      aria-label="一般メンバーの招待を許可"
-                      checked={membersCanInvite}
-                      onChange={(event) =>
-                        setMembersCanInvite(event.target.checked)
-                      }
-                      disabled={settingsBusy}
-                    />
-                  </label>
-                  <label className="field">
-                    <span>招待コードの有効期限</span>
-                    <input
-                      type="datetime-local"
-                      value={expiresAt}
-                      onChange={(event) => setExpiresAt(event.target.value)}
-                      disabled={settingsBusy}
-                    />
-                  </label>
-                  <label className="invite-setting-toggle">
-                    <span>
-                      <strong>招待コードを有効にする</strong>
-                      <small>OFFにすると現在のURL・QR・コードを停止します。</small>
-                    </span>
-                    <input
-                      type="checkbox"
-                      aria-label="招待コードを有効にする"
-                      checked={codeEnabled}
-                      onChange={(event) => setCodeEnabled(event.target.checked)}
-                      disabled={settingsBusy}
-                    />
-                  </label>
-                  <div className="invite-settings__actions">
-                    <button
-                      type="button"
-                      className="secondary-button"
-                      disabled={settingsBusy}
-                      onClick={() => void saveInviteSettings()}
-                    >
-                      <Save size={17} aria-hidden="true" />
-                      設定を保存
-                    </button>
-                    <button
-                      type="button"
-                      className="text-button"
-                      disabled={settingsBusy}
-                      onClick={() => void rotateInviteCode()}
-                    >
-                      <RefreshCw size={16} aria-hidden="true" />
-                      古いコードを無効化して再発行
-                    </button>
                   </div>
-                </section>
+                )}
               </>
             ) : (
               <div className="approval-notice" role="note">

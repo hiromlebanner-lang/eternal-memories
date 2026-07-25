@@ -1059,7 +1059,7 @@ PWAとして使う段階ではMacやXcodeは不要です。App Storeへの最終
 ```text
 pnpm test
 Test Files  16 passed (16)
-Tests       67 passed (67)
+Tests       72 passed (72)
 
 pnpm typecheck
 TypeScript errors: 0
@@ -1206,6 +1206,15 @@ SQL Editorで実行してください。これにより次が追加・更新さ�
 - 参加申請を一度だけ承認するトランザクションRPC
 - オーナー／管理者だけが他人の参加申請を閲覧できるRLS
 - 一般メンバーが招待できるかをアルバム単位で判定するRPC
+
+### 「招待情報を取得できませんでした」と表示される場合
+
+本番PWAだけを先に更新し、安全migrationをまだ適用していない場合、
+Supabaseは `get_album_invite_settings` に `PGRST202` を返します。現在のPWAは
+この状態を検出し、既存の `get_album_invite_code` へ自動的に切り替えるため、
+URL・QR・招待コードは引き続き利用できます。期限設定、コード再発行、
+一般メンバーの招待許可を有効にするには、既存環境用の
+`supabase/migrations/20260725_safe_invite_notifications.sql` を適用します。
 
 ### アプリ内通知の動き
 
