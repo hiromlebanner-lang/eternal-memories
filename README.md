@@ -649,86 +649,234 @@ order by policyname;
 
 ---
 
-## 3. デプロイ方法
+## 3. Vercelへ公開する方法
 
-公開前にWindowsでビルドを確認します。
+ここでは、Windowsとブラウザだけで管理しやすい「GitHubへ保存し、Vercelと連携する方法」を説明します。一度連携すると、GitHubの本番ブランチへ更新を送るたびにVercelが自動で再デプロイします。
+
+MapAlbumにはVercel用の `vercel.json` が含まれています。次の設定は済んでいます。
+
+- Framework: Vite
+- Install Command: `pnpm install --frozen-lockfile`
+- Build Command: `pnpm run build`
+- Output Directory: `dist`
+- SPAの画面を直接開いたときのリライト
+- PWA更新を受け取りやすくするService Workerのキャッシュ設定
+
+### 3-1. 公開前に本番ビルドを確認
+
+MapAlbumフォルダーでPowerShellを開き、次を順番に実行します。
 
 ```powershell
-npm run build
+pnpm install --frozen-lockfile
+pnpm typecheck
+pnpm build
 ```
 
-成功すると `dist` フォルダーができます。
+すべて成功し、最後に `dist` フォルダーが作成されれば公開用ビルドは正常です。
 
-環境変数はデプロイ先にも設定してください。`.env.local` は安全のためアップロードされません。
+`pnpm` が見つからない場合は、Node.jsをインストールしたあと次を一度実行し、PowerShellを開き直します。
 
-### 方法A: Cloudflare Pages
+```powershell
+corepack enable
+corepack prepare pnpm@latest --activate
+```
 
-#### GitHubを使う方法
+### 3-2. GitHubへ保存
 
-1. MapAlbumをGitHubの非公開リポジトリへ保存
-2. [Cloudflare Dashboard](https://dash.cloudflare.com/)へログイン
-3. `Workers & Pages` → `Create` → `Pages`
-4. `Connect to Git` でMapAlbumのリポジトリを選択
-5. Build commandへ次を入力
+1. [GitHub](https://github.com/)でアカウントを作成する
+2. 右上の `+` → `New repository` を押す
+3. Repository nameを `mapalbum-pwa` などにする
+4. 公開したくない場合は `Private` を選ぶ
+5. `Create repository` を押す
+6. GitHub画面の案内に従ってMapAlbumフォルダーをアップロードする
+
+`.env.local` はアップロードしません。このプロジェクトでは `.gitignore` に登録済みです。Supabaseの値は、後述するVercelのEnvironment Variablesへ登録します。
+
+### 3-3. Vercelへインポート
+
+1. [Vercel](https://vercel.com/)を開く
+2. `Continue with GitHub` でログインする
+3. `Add New...` → `Project` を押す
+4. `Import Git Repository` で `mapalbum-pwa` を探し、`Import` を押す
+5. `Configure Project` で次を確認する
 
 ```text
-npm run build
+Framework Preset: Vite
+Root Directory: ./
+Install Command: pnpm install --frozen-lockfile
+Build Command: pnpm run build
+Output Directory: dist
 ```
 
-6. Build output directoryへ次を入力
+通常は `vercel.json` と `pnpm-lock.yaml` から自動設定されます。上記と同じなら変更不要です。
+
+### 3-4. Vercelへ環境変数を設定
+
+最初の `Deploy` を押す前に、`Environment Variables` を開きます。次の2項目を1つずつ追加してください。
+
+| Name | Value |
+|---|---|
+| `VITE_SUPABASE_URL` | SupabaseのProject URL。例: `https://abcdefghijklmnop.supabase.co` |
+| `VITE_SUPABASE_ANON_KEY` | `sb_publishable_` で始まるPublishable Key |
+
+各変数のEnvironmentは、最初は次の3つすべてを選ぶと迷いにくくなります。
+
+- Production
+- Preview
+- Development
+
+注意:
+
+- `sb_secret_...`、`service_role`、Database Passwordは絶対に登録しない
+- URLの末尾へ `/` を追加しない
+- 値を引用符で囲まない
+- `VITE_SUPABASE_ANON_KEY` という名前ですが、値には新しいPublishable Keyを使用できる
+- `VITE_` 変数はビルド時に組み込まれるため、変更後は必ず再デプロイする
+
+プロジェクト作成後に設定する場合は、Vercelの対象Projectを開き、`Settings` → `Environment Variables` から同じ2項目を追加します。追加しただけでは既存Deploymentへ反映されないため、`Deployments` → 最新Deploymentの `…` → `Redeploy` を実行してください。
+
+### 3-5. 最初のデプロイ
+
+1. `Deploy` を押す
+2. `Building` が終わるまで待つ
+3. `Congratulations!` または `Ready` が表示されることを確認する
+4. `Continue to Dashboard` を押す
+5. `Domains` に表示された本番URLをコピーする
+
+本番URLの例:
 
 ```text
-dist
+https://mapalbum-pwa.vercel.app
 ```
 
-7. Environment variablesへ次の2つを追加
+表示されたURLはSupabase設定とiPhoneで使用するため、メモ帳へ保存してください。
+
+### 3-6. SupabaseのリダイレクトURLを設定
+
+Vercelへの初回デプロイ後に行います。
+
+1. [Supabase Dashboard](https://supabase.com/dashboard)でMapAlbumプロジェクトを開く
+2. `Authentication` → `URL Configuration` を開く
+3. `Site URL` をVercelの本番URLへ変更する
+4. `Redirect URLs` にローカルURLとVercel本番URLを追加する
+5. `Save` を押す
+
+設定例:
 
 ```text
-VITE_SUPABASE_URL
-VITE_SUPABASE_ANON_KEY
+Site URL:
+https://mapalbum-pwa.vercel.app
+
+Redirect URLs:
+http://localhost:5173/**
+https://mapalbum-pwa.vercel.app/**
 ```
 
-8. `Save and Deploy` を押す
+`mapalbum-pwa` の部分は、実際にVercelへ表示された名前へ置き換えてください。本番URLはワイルドカードにせず、実際のURLを正確に登録するのが安全です。
 
-#### GitHubを使わない方法
-
-1. Windowsで `npm run build`
-2. Cloudflare PagesのDirect Uploadを選択
-3. `dist` フォルダーをアップロード
-
-更新のたびに `npm run build` と再アップロードが必要です。
-
-### 方法B: Vercel
-
-#### Vercelの画面から公開
-
-1. MapAlbumをGitHubへ保存
-2. [Vercel](https://vercel.com/)へログイン
-3. `Add New` → `Project`
-4. MapAlbumリポジトリを選択
-5. Framework Presetは `Vite`
-6. Build Commandは `npm run build`
-7. Output Directoryは `dist`
-8. Environment Variablesへ次を追加
+Preview Deploymentでもログインを試す場合だけ、Preview URLを個別に追加します。多数のPreview URLを使う場合は、Supabase公式のVercel用パターンも利用できます。
 
 ```text
-VITE_SUPABASE_URL
-VITE_SUPABASE_ANON_KEY
+https://*-あなたのVercelチーム名.vercel.app/**
 ```
 
-9. `Deploy` を押す
-
-このプロジェクトにはSPA表示用の `vercel.json` が含まれています。
-
-### 公開後に必ず行うこと
-
-公開URLをSupabaseの次の場所へ追加します。
+Googleログインを使う場合は、Google Cloud ConsoleのOAuth ClientへVercelの本番URLを追加します。
 
 ```text
-Authentication → URL Configuration → Redirect URLs
+承認済みのJavaScript生成元:
+https://mapalbum-pwa.vercel.app
+
+承認済みのリダイレクトURI:
+https://PROJECT_REF.supabase.co/auth/v1/callback
 ```
 
-Google Cloud Consoleを使っている場合は、公開ドメインをOAuthの「承認済みのJavaScript生成元」にも追加します。
+VercelのURLを「リダイレクトURI」へ入れず、SupabaseのCallback URLと区別してください。
+
+設定後は、Vercel本番URLで次を確認します。
+
+1. 新規登録メールのリンクからVercel版へ戻れる
+2. パスワード再設定メールからVercel版へ戻れる
+3. Google／Appleログイン後にVercel版へ戻れる
+4. ログアウト後にアルバムや写真が表示されない
+
+### 3-7. iPhoneのSafariで開く
+
+1. WindowsでVercelの本番URLをコピーする
+2. 自分宛てのメールやメッセージ、QRコードなどでiPhoneへ送る
+3. iPhoneでリンクを長押しせず通常どおりタップする
+4. Safari以外で開いた場合は、共有メニューから `Safariで開く` を選ぶ
+5. Safariのアドレス欄にVercelの本番URLが表示されていることを確認する
+6. MapAlbumへログインする
+7. 写真追加時にカメラ・写真・位置情報の使用を許可する
+
+位置情報を誤って拒否した場合は、iPhoneの `設定` → `プライバシーとセキュリティ` → `位置情報サービス` → `SafariのWebサイト` から変更できます。
+
+### 3-8. ホーム画面へ追加
+
+1. iPhoneのSafariでVercel本番URLを開く
+2. Safariの共有ボタンを押す
+3. メニューを下へスクロールし、`ホーム画面に追加` を押す
+4. 表示される場合は `Web Appとして開く` をONにする
+5. 名前が `MapAlbum` になっていることを確認する
+6. 右上の `追加` を押す
+7. ホーム画面のMapAlbumアイコンから起動する
+
+`ホーム画面に追加` が見つからない場合は、共有メニュー最下部の `アクションを編集` から追加します。
+
+### 3-9. アプリを更新して再デプロイ
+
+GitHub連携を使う場合:
+
+1. Windowsでコードを更新する
+2. `pnpm typecheck` を実行する
+3. `pnpm build` を実行する
+4. 更新したファイルをGitHubの本番ブランチ（通常は `main`）へ送る
+5. Vercelの `Deployments` で新しいDeploymentが `Ready` になるまで待つ
+6. 本番URLを開き、更新を確認する
+
+本番ブランチへの更新は自動的にProduction Deploymentになります。別ブランチやPull RequestはPreview Deploymentになります。
+
+環境変数だけを変更した場合:
+
+1. Vercelの対象Projectを開く
+2. `Settings` → `Environment Variables` で値を変更する
+3. `Deployments` を開く
+4. 最新Deployment右側の `…` → `Redeploy`
+5. `Ready` になったらログインを確認する
+
+PWAは更新を自動確認します。ホーム画面版がすぐに変わらない場合は、MapAlbumを一度完全に閉じて開き直します。それでも変わらない場合はSafariで本番URLを開き、再読み込みしてからホーム画面版を開き直してください。
+
+### 3-10. Vercel公開チェックリスト
+
+- [ ] `pnpm typecheck` がエラー0で終了した
+- [ ] `pnpm build` が成功し、`dist` が作成された
+- [ ] GitHubへ `.env.local` をアップロードしていない
+- [ ] VercelのFramework Presetが `Vite`
+- [ ] Build Commandが `pnpm run build`
+- [ ] Output Directoryが `dist`
+- [ ] `VITE_SUPABASE_URL` を設定した
+- [ ] `VITE_SUPABASE_ANON_KEY` にPublishable Keyを設定した
+- [ ] Secret Keyや`service_role`を設定していない
+- [ ] 環境変数を設定後にデプロイまたはRedeployした
+- [ ] SupabaseのSite URLをVercel本番URLへ設定した
+- [ ] SupabaseのRedirect URLsへVercel本番URLを追加した
+- [ ] 新規登録・メール確認・ログイン・ログアウトを確認した
+- [ ] パスワード再設定後にVercel版へ戻れる
+- [ ] Google／Appleログイン後にVercel版へ戻れる
+- [ ] iPhone Safariでカメラ・写真・位置情報を許可できた
+- [ ] ホーム画面からMapAlbumを単独起動できた
+
+公式資料:
+
+- [Vercel: Viteの公開とSPAリライト](https://vercel.com/docs/frameworks/frontend/vite)
+- [Vercel: Environment Variables](https://vercel.com/docs/environment-variables)
+- [Vercel: Development／Preview／Production](https://vercel.com/docs/deployments/environments)
+- [Supabase: Redirect URLs](https://supabase.com/docs/guides/auth/redirect-urls)
+- [Apple: SafariのWebサイトをホーム画面へ追加](https://support.apple.com/guide/iphone/iphea86e5236/ios)
+
+### 補足: Cloudflare Pagesへ公開する場合
+
+Cloudflare Pagesを使う場合もBuild Commandは `pnpm run build`、Build output directoryは `dist` です。ProductionのEnvironment Variablesへ `VITE_SUPABASE_URL` と `VITE_SUPABASE_ANON_KEY` を設定し、公開URLをSupabaseのSite URL／Redirect URLsへ登録してください。
 
 ---
 
