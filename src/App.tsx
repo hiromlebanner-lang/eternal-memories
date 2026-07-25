@@ -33,6 +33,7 @@ import { ShareAlbumModal } from "./components/ShareAlbumModal";
 import {
   clearPrivateOfflineData,
   createAlbum,
+  deleteAlbum,
   deletePhoto,
   loadAlbumInviteSettings,
   loadAlbums,
@@ -763,6 +764,16 @@ function Dashboard({
     setToast("アルバムを作成しました");
   };
 
+  const removeAlbum = async (albumID: string) => {
+    const album = albums.find((candidate) => candidate.id === albumID);
+    if (!album || album.owner_id !== user.id) {
+      throw new Error("アルバムを削除できるのはオーナーだけです");
+    }
+    await deleteAlbum(albumID);
+    await refreshAlbums();
+    setToast("アルバムを削除しました");
+  };
+
   const enterAlbum = async (code: string) => {
     await requestAlbumMembership({ inviteCode: code });
     setPendingJoinCount((current) => current + 1);
@@ -1070,11 +1081,13 @@ function Dashboard({
       {showsAlbumManager ? (
         <AlbumManager
           albums={albums}
+          currentUserID={user.id}
           selectedAlbumID={selectedAlbumID}
           onClose={() => setShowsAlbumManager(false)}
           onSelect={setSelectedAlbumID}
           onCreate={addAlbum}
           onJoin={enterAlbum}
+          onDelete={removeAlbum}
         />
       ) : null}
 

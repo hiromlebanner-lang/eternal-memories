@@ -1437,6 +1437,15 @@ img {
   color: var(--accent-deep);
 }
 
+.album-manager__actions > .danger-button {
+  color: var(--danger);
+  background: rgb(217 45 63 / 7%);
+}
+
+.album-manager__actions > .danger-button > svg {
+  color: var(--danger);
+}
+
 .album-manager__actions > button > span {
   display: grid;
   gap: 2px;

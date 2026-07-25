@@ -294,6 +294,37 @@ export async function createAlbum(name: string, description: string) {
   return data.id as string;
 }
 
+export async function deleteAlbum(albumID: string) {
+  const client = requireSupabase();
+  const {
+    data: { user },
+    error: userError,
+  } = await client.auth.getUser();
+  if (userError || !user) {
+    throw new Error("ログイン状態を確認できませんでした。");
+  }
+
+  const { data: album, error: albumError } = await client
+    .from("albums")
+    .select("owner_id")
+    .eq("id", albumID)
+    .maybeSingle();
+  if (albumError) throw toAppError(albumError, "アルバムを確認できませんでした。");
+  if (!album || album.owner_id !== user.id) {
+    throw new Error("アルバムを削除できるのはオーナーだけです");
+  }
+
+  const { data, error } = await client
+    .from("albums")
+    .delete()
+    .eq("id", albumID)
+    .eq("owner_id", user.id)
+    .select("id")
+    .maybeSingle();
+  if (error) throw toAppError(error, "アルバムを削除できませんでした。");
+  if (!data) throw new Error("アルバムを削除できるのはオーナーだけです");
+}
+
 export async function requestAlbumMembership(input: {
   inviteCode?: string;
   inviteToken?: string;

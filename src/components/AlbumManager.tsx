@@ -4,6 +4,7 @@ import {
   Image,
   Plus,
   TicketCheck,
+  Trash2,
   Users,
 } from "lucide-react";
 import { useState, type FormEvent } from "react";
@@ -13,20 +14,24 @@ import { Modal } from "./Modal";
 
 interface AlbumManagerProps {
   albums: Album[];
+  currentUserID: string;
   selectedAlbumID?: string;
   onClose: () => void;
   onSelect: (albumID: string) => void;
   onCreate: (name: string, description: string) => Promise<void>;
   onJoin: (code: string) => Promise<void>;
+  onDelete: (albumID: string) => Promise<void>;
 }
 
 export function AlbumManager({
   albums,
+  currentUserID,
   selectedAlbumID,
   onClose,
   onSelect,
   onCreate,
   onJoin,
+  onDelete,
 }: AlbumManagerProps) {
   const [action, setAction] = useState<"list" | "create" | "join">("list");
   const [name, setName] = useState("");
@@ -58,6 +63,26 @@ export function AlbumManager({
       onClose();
     } catch (caught) {
       setError(formatErrorMessage(caught, "参加できませんでした。"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const selectedAlbum = albums.find((album) => album.id === selectedAlbumID);
+  const deleteSelectedAlbum = async () => {
+    if (!selectedAlbum || selectedAlbum.owner_id !== currentUserID) return;
+    if (!window.confirm(`「${selectedAlbum.name}」を削除しますか？この操作は取り消せません。`)) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await onDelete(selectedAlbum.id);
+      onClose();
+    } catch (caught) {
+      setError(
+        formatErrorMessage(caught, "アルバムを削除できるのはオーナーだけです"),
+      );
     } finally {
       setBusy(false);
     }
@@ -112,6 +137,20 @@ export function AlbumManager({
           </div>
 
           <div className="album-manager__actions">
+            {selectedAlbum?.owner_id === currentUserID ? (
+              <button
+                className="danger-button"
+                type="button"
+                disabled={busy}
+                onClick={deleteSelectedAlbum}
+              >
+                <Trash2 size={19} />
+                <span>
+                  <strong>このアルバムを削除</strong>
+                  <small>オーナーだけが実行できます</small>
+                </span>
+              </button>
+            ) : null}
             <button type="button" onClick={() => setAction("create")}>
               <Plus size={19} />
               <span>
