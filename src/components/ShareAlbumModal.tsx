@@ -12,14 +12,16 @@ import {
   ShieldCheck,
   Users,
 } from "lucide-react";
-import { useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState, type FormEvent } from "react";
 import {
   createEmailInvitation,
+  loadSentAlbumInvitations,
+  revokeDirectAlbumInvitation,
   rotateAlbumInviteCode,
   updateAlbumInviteSettings,
 } from "../lib/data";
 import { buildInviteURL } from "../lib/sharing";
-import type { Album, AlbumRole } from "../types";
+import type { Album, AlbumInvitation, AlbumRole } from "../types";
 import { InviteQRCode } from "./InviteQRCode";
 import { Modal } from "./Modal";
 
@@ -43,6 +45,20 @@ function isShareCancellation(error: unknown) {
     "name" in error &&
     (error as { name?: unknown }).name === "AbortError"
   );
+}
+
+function invitationStatus(invitation: AlbumInvitation, now: number) {
+  if (
+    invitation.status === "pending" &&
+    new Date(invitation.expires_at).getTime() <= now
+  )
+    return "期限切れ";
+  return {
+    pending: "承認待ち",
+    accepted: "参加済み",
+    rejected: "辞退",
+    revoked: "無効",
+  }[invitation.status];
 }
 
 interface ShareAlbumModalProps {
@@ -79,6 +95,9 @@ export function ShareAlbumModal({
   }>();
   const [error, setError] = useState("");
   const isManager = album.role === "owner" || album.role === "admin";
+  const [sentInvitations, setSentInvitations] = useState<AlbumInvitation[]>(
+    [],
+  );
   const canInvite = isManager || Boolean(album.can_invite);
   const supportsAdvancedInviteSettings =
     album.invite_settings_supported !== false;
@@ -103,6 +122,19 @@ export function ShareAlbumModal({
     [inviteCode],
   );
   const invitableRoles = isManager ? INVITABLE_ROLES : ["member" as const];
+
+  useEffect(() => {
+    if (!isManager) return;
+    let active = true;
+    void loadSentAlbumInvitations(album.id)
+      .then((invitations) => {
+        if (active) setSentInvitations(invitations);
+      })
+      .catch(() => undefined);
+    return () => {
+      active = false;
+    };
+  }, [album.id, isManager]);
 
   const saveInviteSettings = async () => {
     setSettingsBusy(true);
@@ -208,6 +240,9 @@ export function ShareAlbumModal({
       });
       const link = buildInviteURL("invite", next.invitation.token);
       setResult({ link, emailSent: next.emailSent, email: targetEmail });
+      if (isManager) {
+        setSentInvitations(await loadSentAlbumInvitations(album.id));
+      }
       setEmail("");
       onNotice(
         next.emailSent
@@ -219,6 +254,22 @@ export function ShareAlbumModal({
         caught instanceof Error
           ? caught.message
           : "招待を作成できませんでした。時間をおいて再度お試しください。",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const revokeInvitation = async (invitationID: string) => {
+    setBusy(true);
+    setError("");
+    try {
+      await revokeDirectAlbumInvitation(invitationID);
+      setSentInvitations(await loadSentAlbumInvitations(album.id));
+      onNotice("招待を取り消しました");
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "招待を取り消せませんでした。",
       );
     } finally {
       setBusy(false);
@@ -526,6 +577,40 @@ export function ShareAlbumModal({
                     <Copy size={17} aria-hidden="true" />
                     専用URLをコピー
                   </button>
+                </div>
+              ) : null}
+
+              {isManager && sentInvitations.length > 0 ? (
+                <div className="stack-form" aria-label="招待済み一覧">
+                  <strong>招待済み一覧</strong>
+                  {sentInvitations.map((invitation) => (
+                    <div className="invite-result" key={invitation.id}>
+                      <Mail size={18} aria-hidden="true" />
+                      <span>
+                        <strong>
+                          {invitation.invited_user_name || invitation.email}
+                        </strong>
+                        <small>
+                          {invitation.email}・
+                          {ROLE_LABEL[invitation.role]}・
+                          {invitationStatus(invitation, openedAt)}・
+                          {new Date(invitation.created_at).toLocaleString(
+                            "ja-JP",
+                          )}
+                        </small>
+                      </span>
+                      {invitation.status === "pending" &&
+                      new Date(invitation.expires_at).getTime() > openedAt ? (
+                        <button
+                          type="button"
+                          disabled={busy}
+                          onClick={() => void revokeInvitation(invitation.id)}
+                        >
+                          取り消す
+                        </button>
+                      ) : null}
+                    </div>
+                  ))}
                 </div>
               ) : null}
             </section>

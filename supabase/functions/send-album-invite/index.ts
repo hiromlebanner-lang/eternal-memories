@@ -1,4 +1,5 @@
 import { createClient } from "npm:@supabase/supabase-js@2";
+import webpush from "npm:web-push@3.6.7";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -85,6 +86,10 @@ Deno.serve(async (request) => {
     const resendAPIKey = Deno.env.get("RESEND_API_KEY");
     const from = Deno.env.get("INVITE_FROM_EMAIL");
     const appURLValue = Deno.env.get("APP_URL");
+    const serviceRoleKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY");
+    const vapidSubject = Deno.env.get("VAPID_SUBJECT");
+    const vapidPublicKey = Deno.env.get("VAPID_PUBLIC_KEY");
+    const vapidPrivateKey = Deno.env.get("VAPID_PRIVATE_KEY");
 
     if (
       !supabaseURL ||
@@ -197,15 +202,15 @@ Deno.serve(async (request) => {
           `MapAlbum「${albumName}」へ招待されました。\n` +
           `予定されている権限: ${roleLabel}\n\n` +
           `${inviteURL}\n\n` +
-          "リンクからログインして参加申請を送ってください。オーナーまたは管理者の承認後に参加できます。",
+          "リンクからログインし、「参加する」または「参加しない」を選択してください。",
         html: `
           <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:auto;color:#273235">
             <div style="padding:28px;border:1px solid #e7e8e8;border-radius:24px">
               <p style="margin:0 0 8px;color:#ff665b;font-weight:700">MapAlbum</p>
               <h1 style="margin:0 0 14px;font-size:24px">「${safeAlbumName}」への招待</h1>
               <p style="line-height:1.7">共有写真アルバムへ招待されました。予定されている権限は「${roleLabel}」です。</p>
-              <a href="${safeInviteURL}" style="display:inline-block;margin:14px 0;padding:13px 20px;border-radius:14px;background:#ff665b;color:#fff;text-decoration:none;font-weight:700">参加を申請する</a>
-              <p style="color:#6d7476;font-size:13px;line-height:1.7">リンクから招待されたメールアドレスでログインしてください。参加にはオーナーまたは管理者の承認が必要です。</p>
+              <a href="${safeInviteURL}" style="display:inline-block;margin:14px 0;padding:13px 20px;border-radius:14px;background:#ff665b;color:#fff;text-decoration:none;font-weight:700">招待を確認する</a>
+              <p style="color:#6d7476;font-size:13px;line-height:1.7">リンクから招待されたメールアドレスでログインし、「参加する」または「参加しない」を選択してください。</p>
             </div>
           </div>
         `,
@@ -218,6 +223,77 @@ Deno.serve(async (request) => {
     if (!resendResponse.ok) {
       console.error("Resend error", resendResponse.status, resendBody);
       return json({ error: "招待メールを送信できませんでした" }, 502);
+    }
+
+    if (
+      serviceRoleKey &&
+      vapidSubject &&
+      vapidPublicKey &&
+      vapidPrivateKey
+    ) {
+      try {
+        const admin = createClient(supabaseURL, serviceRoleKey, {
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
+        const { data: invitedProfile } = await admin
+          .from("profiles")
+          .select("id")
+          .ilike("email", invitation.email)
+          .maybeSingle();
+        if (invitedProfile?.id) {
+          const { data: subscriptions } = await admin
+            .from("push_subscriptions")
+            .select("id, endpoint, p256dh, auth_key")
+            .eq("user_id", invitedProfile.id)
+            .eq("enabled", true);
+          webpush.setVapidDetails(
+            vapidSubject,
+            vapidPublicKey,
+            vapidPrivateKey,
+          );
+          const payload = JSON.stringify({
+            title: "アルバムへの招待が届きました",
+            body: `${user.user_metadata?.display_name || "アルバム管理者"}さんから『${albumName}』へ招待されました`,
+            tag: `album-invitation-${invitation.id}`,
+            albumID: invitation.album_id,
+            url: inviteURL,
+          });
+          await Promise.allSettled(
+            (subscriptions ?? []).map(async (subscription) => {
+              try {
+                await webpush.sendNotification(
+                  {
+                    endpoint: subscription.endpoint,
+                    keys: {
+                      p256dh: subscription.p256dh,
+                      auth: subscription.auth_key,
+                    },
+                  },
+                  payload,
+                );
+              } catch (pushError) {
+                const statusCode =
+                  typeof pushError === "object" &&
+                  pushError !== null &&
+                  "statusCode" in pushError
+                    ? Number(pushError.statusCode)
+                    : 0;
+                if (statusCode === 404 || statusCode === 410) {
+                  await admin
+                    .from("push_subscriptions")
+                    .update({ enabled: false })
+                    .eq("id", subscription.id);
+                }
+              }
+            }),
+          );
+        }
+      } catch (pushError) {
+        console.error(
+          "Direct invitation push failed",
+          pushError instanceof Error ? pushError.message : "unknown error",
+        );
+      }
     }
 
     return json({ sent: true, id: resendBody.id ?? null });

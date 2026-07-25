@@ -476,6 +476,57 @@ export async function createEmailInvitation(input: {
   };
 }
 
+export async function loadMyDirectAlbumInvitations() {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc(
+    "get_my_direct_album_invitations",
+  );
+  if (error) {
+    throw toAppError(error, "招待情報を取得できませんでした。");
+  }
+  return (data ?? []) as AlbumInvitation[];
+}
+
+export async function respondToDirectAlbumInvitation(
+  invitationID: string,
+  accept: boolean,
+) {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc(
+    "respond_to_album_invitation",
+    {
+      p_invitation_id: invitationID,
+      p_accept: accept,
+    },
+  );
+  if (error) {
+    throw toAppError(error, "招待を処理できませんでした。");
+  }
+  return data as string | null;
+}
+
+export async function loadSentAlbumInvitations(albumID: string) {
+  const client = requireSupabase();
+  const { data, error } = await client.rpc(
+    "get_album_direct_invitations",
+    { p_album_id: albumID },
+  );
+  if (error) {
+    throw toAppError(error, "招待済み一覧を取得できませんでした。");
+  }
+  return (data ?? []) as AlbumInvitation[];
+}
+
+export async function revokeDirectAlbumInvitation(invitationID: string) {
+  const client = requireSupabase();
+  const { error } = await client.rpc("revoke_album_invitation", {
+    p_invitation_id: invitationID,
+  });
+  if (error) {
+    throw toAppError(error, "招待を取り消せませんでした。");
+  }
+}
+
 export async function loadAlbumInviteCode(albumID: string) {
   const client = requireSupabase();
   const { data, error } = await client.rpc("get_album_invite_code", {

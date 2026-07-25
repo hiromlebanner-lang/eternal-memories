@@ -39,10 +39,12 @@ import {
   deletePhoto,
   loadAlbumInviteSettings,
   loadAlbums,
+  loadMyDirectAlbumInvitations,
   loadManagedJoinRequests,
   loadMyPendingJoinRequests,
   loadPhotos,
   requestAlbumMembership,
+  respondToDirectAlbumInvitation,
   updateProfileDisplayName,
   updatePhoto,
   uploadProfileAvatar,
@@ -71,6 +73,7 @@ import { isSupabaseConfigured, supabase } from "./lib/supabase";
 import { CATEGORY_META } from "./types";
 import type {
   Album,
+  AlbumInvitation,
   AlbumJoinRequest,
   AlbumPhoto,
   AppUser,
@@ -349,6 +352,12 @@ function Dashboard({
   >([]);
   const [joinRequestPopup, setJoinRequestPopup] =
     useState<AlbumJoinRequest[]>();
+  const [directInvitations, setDirectInvitations] = useState<
+    AlbumInvitation[]
+  >([]);
+  const [showsDirectInvitations, setShowsDirectInvitations] = useState(false);
+  const [busyDirectInvitationID, setBusyDirectInvitationID] =
+    useState<string>();
   const [joinNotificationsEnabled, setJoinNotificationsEnabledState] =
     useState(false);
   const [notificationBusy, setNotificationBusy] = useState(true);
@@ -489,6 +498,21 @@ function Dashboard({
     }
   }, [user.id]);
 
+  const refreshDirectInvitations = useCallback(async (token?: string) => {
+    try {
+      const invitations = await loadMyDirectAlbumInvitations();
+      if (token) {
+        invitations.sort((left, right) =>
+          left.token === token ? -1 : right.token === token ? 1 : 0,
+        );
+      }
+      setDirectInvitations(invitations);
+      if (invitations.length > 0) setShowsDirectInvitations(true);
+    } catch {
+      setToast("招待情報を取得できませんでした。");
+    }
+  }, []);
+
   const refreshPhotos = useCallback(async () => {
     if (!selectedAlbumID) {
       setPhotos([]);
@@ -511,6 +535,10 @@ function Dashboard({
   useEffect(() => {
     void refreshAlbums();
   }, [refreshAlbums]);
+
+  useEffect(() => {
+    void refreshDirectInvitations();
+  }, [refreshDirectInvitations]);
 
   useEffect(() => {
     void refreshManagedJoinRequests({ notify: true });
@@ -565,9 +593,15 @@ function Dashboard({
 
     const acceptInvite = async () => {
       try {
+        if (inviteToken) {
+          await refreshDirectInvitations(inviteToken);
+          const url = new URL(window.location.href);
+          url.searchParams.delete("invite");
+          window.history.replaceState({}, "", url);
+          return;
+        }
         await requestAlbumMembership({
           inviteCode: inviteCode ?? undefined,
-          inviteToken: inviteToken ?? undefined,
         });
         setPendingJoinCount((current) => current + 1);
         setToast("参加申請を送りました。オーナーの承認をお待ちください");
@@ -580,7 +614,7 @@ function Dashboard({
       }
     };
     void acceptInvite();
-  }, []);
+  }, [refreshDirectInvitations]);
 
   useEffect(() => {
     const online = () => {
@@ -899,9 +933,7 @@ function Dashboard({
     setBusyNearbyUserID(candidate.id);
     try {
       await createNearbyInvitation(selectedAlbum.id, candidate.id);
-      setToast(
-        `${candidate.displayName}さんへ招待を送りました。相手が受け取ると参加申請になります`,
-      );
+      setToast(`${candidate.displayName}さんへ招待を送りました`);
     } catch (caught) {
       setToast(
         caught instanceof Error
@@ -922,10 +954,9 @@ function Dashboard({
       await respondToNearbyInvitation(invitation.id, accept);
       await nearby.refreshIncomingInvitations();
       if (accept) {
-        setPendingJoinCount((current) => current + 1);
-        setToast(
-          "参加申請を送りました。オーナーまたは管理者の承認後に参加できます",
-        );
+        await refreshAlbums();
+        setSelectedAlbumID(invitation.albumId);
+        setToast("アルバムに参加しました");
       } else {
         setToast("招待を辞退しました");
       }
@@ -937,6 +968,39 @@ function Dashboard({
       );
     } finally {
       setBusyNearbyInvitationID(undefined);
+    }
+  };
+
+  const respondDirectInvitation = async (
+    invitation: AlbumInvitation,
+    accept: boolean,
+  ) => {
+    setBusyDirectInvitationID(invitation.id);
+    try {
+      const albumID = await respondToDirectAlbumInvitation(
+        invitation.id,
+        accept,
+      );
+      const remaining = directInvitations.filter(
+        (candidate) => candidate.id !== invitation.id,
+      );
+      setDirectInvitations(remaining);
+      setShowsDirectInvitations(remaining.length > 0);
+      if (accept && albumID) {
+        await refreshAlbums();
+        setSelectedAlbumID(albumID);
+        setToast("アルバムに参加しました");
+      } else {
+        setToast("招待を辞退しました");
+      }
+    } catch (caught) {
+      setToast(
+        caught instanceof Error
+          ? caught.message
+          : "招待を処理できませんでした。",
+      );
+    } finally {
+      setBusyDirectInvitationID(undefined);
     }
   };
 
@@ -983,6 +1047,21 @@ function Dashboard({
         </button>
 
         <div className="header-actions">
+          {directInvitations.length > 0 ? (
+            <button
+              className="icon-button header-invite-button"
+              type="button"
+              onClick={() => setShowsDirectInvitations(true)}
+              aria-label={`招待が${directInvitations.length}件届いています`}
+            >
+              <Bell size={20} />
+              <span className="notification-badge">
+                {directInvitations.length > 99
+                  ? "99+"
+                  : directInvitations.length}
+              </span>
+            </button>
+          ) : null}
           {selectedAlbum &&
           canInviteToAlbum(
             selectedAlbum.role,
@@ -1250,6 +1329,60 @@ function Dashboard({
             setShowsMembers(true);
           }}
         />
+      ) : null}
+
+      {showsDirectInvitations && directInvitations.length > 0 ? (
+        <Modal
+          title={`招待が${directInvitations.length}件届いています`}
+          onClose={() => setShowsDirectInvitations(false)}
+        >
+          <div className="approval-list">
+            {directInvitations.map((invitation) => (
+              <article className="member-row" key={invitation.id}>
+                <span className="member-avatar">
+                  {(invitation.invited_by_name || "招").slice(0, 1)}
+                </span>
+                <div className="member-copy">
+                  <strong>
+                    {invitation.invited_by_name || "アルバム管理者"}さんから
+                  </strong>
+                  <small>
+                    「{invitation.album_name || "アルバム"}」へ招待されました
+                  </small>
+                </div>
+                <div className="approval-actions">
+                  <button
+                    className="approval-button approval-button--approve"
+                    type="button"
+                    disabled={busyDirectInvitationID === invitation.id}
+                    onClick={() =>
+                      void respondDirectInvitation(invitation, true)
+                    }
+                  >
+                    参加する
+                  </button>
+                  <button
+                    className="approval-button approval-button--reject"
+                    type="button"
+                    disabled={busyDirectInvitationID === invitation.id}
+                    onClick={() =>
+                      void respondDirectInvitation(invitation, false)
+                    }
+                  >
+                    参加しない
+                  </button>
+                </div>
+              </article>
+            ))}
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setShowsDirectInvitations(false)}
+            >
+              あとで
+            </button>
+          </div>
+        </Modal>
       ) : null}
 
       {showsSettings ? (

@@ -63,6 +63,10 @@ export interface AlbumInvitation {
   status: "pending" | "accepted" | "rejected" | "revoked";
   created_at: string;
   expires_at: string;
+  album_name?: string;
+  invited_by?: string;
+  invited_by_name?: string;
+  invited_user_name?: string | null;
 }
 
 export interface AlbumJoinRequest {
