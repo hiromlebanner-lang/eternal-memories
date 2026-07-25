@@ -100,28 +100,121 @@ npm run icons
 
 ## 2. Supabaseの設定方法
 
-Supabaseが認証、アルバムデータ、メンバー権限、写真ファイルを管理します。
+Supabaseが認証、アルバムデータ、メンバー権限、写真ファイルを管理します。ここでは、空のSupabaseプロジェクトをMapAlbumへ接続するところまでを、画面操作の順番どおりに説明します。
+
+設定中に使う値は次の3つです。メモ帳などへ一時的に控えてください。
+
+| 名前 | 例 | 使用場所 |
+|---|---|---|
+| Project Reference | `abcdefghijklmnop` | URL、OAuth Callback URL、CLI |
+| Project URL | `https://abcdefghijklmnop.supabase.co` | `VITE_SUPABASE_URL` |
+| Publishable Key | `sb_publishable_...` | `VITE_SUPABASE_ANON_KEY` |
+
+MapAlbumの現在の公開URL:
+
+```text
+https://mapalbum-japan-2026.noguo22.chatgpt.site
+```
+
+> `VITE_SUPABASE_ANON_KEY` という環境変数名は既存コードとの互換性のため残していますが、値には新しいPublishable Keyを設定できます。Publishable Keyはブラウザー用の低権限キーです。`sb_secret_...`、`service_role`、データベースパスワードは絶対に設定しないでください。
 
 ### 2-1. Supabaseプロジェクトを作成
 
-1. [Supabase](https://supabase.com/)を開く
-2. アカウントを作成してログイン
-3. `New project` を押す
-4. プロジェクト名、データベースパスワード、リージョンを設定
-5. 日本向けの場合はTokyoに近いリージョンを選択
-6. プロジェクト作成が完了するまで待つ
+1. [Supabase Dashboard](https://supabase.com/dashboard)を開く
+2. Supabaseアカウントを作成してログインする
+3. 初回はOrganizationを作成する。個人利用なら自分だけのOrganizationで構いません
+4. `New project` を押す
+5. 次を入力する
+   - `Name`: `MapAlbum` など分かりやすい名前
+   - `Database Password`: 自動生成するか、長く推測されにくい文字列
+   - `Region`: 主な利用者が日本なら `Northeast Asia (Tokyo)`
+   - `Pricing Plan`: 試作はFree planから開始可能
+6. `Create new project` を押す
+7. 数分待ち、Project Overviewが開いてステータスが利用可能になることを確認する
 
-データベースパスワードは安全な場所へ保管してください。アプリの `.env` には入力しません。
+データベースパスワードはパスワード管理アプリなどへ保管してください。MapAlbumの `.env` には入力しません。リージョンは作成後に簡単には変更できないため、利用者に近い場所を選びます。
 
-### 2-2. データベースを作成
+### 2-2. URLとPublishable Keyを取得
+
+1. 作成したSupabaseプロジェクトを開く
+2. 画面上部の `Connect` を押す
+3. `Project URL` をコピーする
+4. `Publishable key` をコピーする
+5. `Publishable key` が表示されない場合は、左下の `Project Settings` → `API Keys` を開く
+6. `Publishable key` セクションから `sb_publishable_` で始まる値をコピーする
+7. まだPublishable Keyがない場合だけ `Create new API key` で作成する
+
+古いSupabase画面では `Project Settings` → `API` → `Project API keys` に `anon public` キーが表示されます。MapAlbumではこの旧 `anon` キーも使用できますが、新規設定ではPublishable Keyを推奨します。
+
+キーの選び間違い:
+
+| キー | MapAlbumのブラウザーへ設定 | 理由 |
+|---|---:|---|
+| `sb_publishable_...` | ○ | RLSとユーザーログインを前提に安全に公開できる |
+| 旧 `anon` キー | △ | 使用可能だが旧形式 |
+| `sb_secret_...` | 絶対に不可 | RLSを迂回できる高権限キー |
+| 旧 `service_role` | 絶対に不可 | RLSを迂回できる高権限キー |
+
+### 2-3. Windowsのローカル環境変数へ設定
+
+MapAlbumフォルダーをVisual Studio Codeで開き、PowerShellで次を実行します。
+
+```powershell
+Copy-Item .env.example .env.local
+code .env.local
+```
+
+Visual Studio Codeの `code` コマンドが使えない場合は、エクスプローラーから `.env.local` をメモ帳で開いても構いません。内容を次のように変更します。
+
+```env
+VITE_SUPABASE_URL=https://abcdefghijklmnop.supabase.co
+VITE_SUPABASE_ANON_KEY=sb_publishable_xxxxxxxxxxxxxxxxx
+```
+
+- URLの末尾に `/` を追加しない
+- 値を引用符で囲まない
+- `=` の前後へ空白を入れない
+- `.env.local` をGitHub、メール、チャットへ添付しない
+- `.env.local` はすでに `.gitignore` の対象
+
+Viteは起動時に環境変数を読み込むため、すでに開発画面が動いている場合は `Ctrl + C` で停止してから再起動します。
+
+```powershell
+npm run dev
+```
+
+`Supabaseが未設定です` という赤い警告が消えれば、URLとKeyの読み込みは成功です。
+
+### 2-4. SQLを実行してデータベースを作成
 
 1. Supabase左メニューの `SQL Editor` を開く
 2. `New query` を押す
-3. `supabase/schema.sql` の内容をすべてコピー
-4. SQL Editorへ貼り付ける
-5. `Run` を1回押す
+3. MapAlbumフォルダーの `supabase/schema.sql` をVisual Studio Codeで開く
+4. ファイル全体を `Ctrl + A` → `Ctrl + C` でコピーする
+5. SQL Editorへ貼り付ける
+6. 右下または上部の `Run` を1回だけ押す
+7. `Success. No rows returned` などの成功表示を確認する
 
-このSQLにより次が作成されます。
+Windows PowerShellからSQL全体をクリップボードへコピーする場合:
+
+```powershell
+Get-Content .\supabase\schema.sql -Raw | Set-Clipboard
+```
+
+SQL Editorへ戻り、`Ctrl + V` で貼り付けます。
+
+このSQLにより次がまとめて作成されます。
+
+- 6つのアプリ用テーブル
+- 各テーブルのRLS有効化と権限ポリシー
+- Private Storageバケット `album-photos`
+- Storage用RLSポリシー
+- owner／admin／member／viewerの権限判定
+- 招待、参加申請、承認、権限変更用RPC
+- プロフィール作成などのDatabase Trigger
+- 写真とメンバー変更用Realtime設定
+
+作成されるテーブル:
 
 - `profiles`
 - `albums`
@@ -129,41 +222,64 @@ Supabaseが認証、アルバムデータ、メンバー権限、写真ファイ
 - `photos`
 - `album_invitations`
 - `album_join_requests`
-- 非公開Storageバケット `album-photos`
-- 権限を守るRLSポリシー
-- 招待作成、参加申請、承認、権限変更用の安全なRPC
-- 写真更新用Realtime設定
 
-SQLは複数回実行できます。再実行時はMapAlbumの旧RLSポリシーを安全側へ作り直し、`album_members.role`、`album_invitations.role`、`album_join_requests.requested_role` の3列を新しい4権限へ統一します。旧版の `editor` は `member`、各アルバムの作成者は `owner` へ移行されます。既存の招待コードはリンク切れを避けて維持され、新しく作るアルバムには推測しにくい16文字のコードが発行されます。
+SQL実行後、左メニューの `Table Editor` を開き、上の6テーブルが表示されることを確認します。手動でテーブルや「全員許可」ポリシーを追加する必要はありません。
 
-### 2-3. メールログインを設定
+SQLは更新時に再実行できますが、本番データがある場合は先にバックアップを取得してください。既存の招待コードは維持され、旧 `editor` 権限は `member`、各アルバム作成者は `owner` へ移行されます。
 
-1. Supabase左メニューの `Authentication` → `Providers` を開く
-2. `Email` を有効にする
-3. `Confirm email` を必ず有効にする
-4. `Secure email change` も有効にする
-5. `Authentication` → `Email Templates` で次のメールを確認する
+### 2-5. メール認証を設定
+
+1. Supabase左メニューの `Authentication` を開く
+2. `Sign In / Providers` または `Providers` を開く
+3. `Email` を選ぶ
+4. `Enable Email provider` をONにする
+5. `Allow new users to sign up` をONにする
+6. `Confirm email` を必ずONにする
+7. `Secure email change` もONにする
+8. `Save` を押す
+9. `Authentication` → `Email Templates` で次のテンプレートを確認する
    - `Confirm signup`
    - `Reset password`
    - `Change email address`
 
 `Confirm email` が有効な場合、新規登録直後にはログインセッションが作成されません。利用者が確認メール内のリンクを開いた後にログイン可能になります。本番運用では無効にしないでください。
 
-Supabase標準のメール送信は開発・試験向けの制限があります。本番運用では `Project Settings` → `Auth` → `SMTP Settings` で独自SMTPを設定してください。
+Supabase標準メールは開発確認用です。独自SMTPがない状態では、プロジェクトチームに登録されたメールアドレス以外へ送信できない場合があり、送信数にも強い制限があります。本番運用では `Authentication` → `SMTP Settings` またはAuth設定画面の `Custom SMTP` を開き、Resend、Postmark、Amazon SESなどのSMTPを設定してください。
 
 パスワード再設定は、ログイン画面の「パスワードを忘れた場合」から行います。再設定メールのリンクを開くとMapAlbumへ戻り、新しいパスワード入力画面が表示されます。
 
-### 2-4. Googleログインを設定
+メールが届かない場合:
+
+1. `Authentication` → `Users` にユーザーが作成されているか確認
+2. 迷惑メールフォルダーを確認
+3. 独自SMTP未設定なら、テスト先メールをSupabase OrganizationのTeamへ追加
+4. `Authentication` のLogsで `Email address not authorized` や送信上限エラーを確認
+5. メール追跡によるリンク書き換えを使用している場合は無効化
+
+### 2-6. Googleログインを設定
 
 GoogleログインにはGoogle Cloud ConsoleのOAuth設定が必要です。
 
-1. [Google Cloud Console](https://console.cloud.google.com/)でプロジェクトを作成
-2. `APIとサービス` → `OAuth同意画面` を設定
-3. `認証情報` → `OAuthクライアントID` を作成
-4. アプリケーションの種類は `ウェブアプリケーション`
-5. SupabaseのGoogle Provider画面に表示されるCallback URLを、Google側の「承認済みのリダイレクトURI」へ追加
-6. Googleが発行したClient IDとClient SecretをSupabaseへ入力
-7. Supabaseの `Authentication` → `Providers` → `Google` を有効化
+1. Supabaseの `Authentication` → `Providers` → `Google` を開いておく
+2. 画面に表示される `Callback URL` をコピーする
+3. [Google Cloud Console](https://console.cloud.google.com/)でプロジェクトを作成または選択する
+4. `Google Auth Platform` → `Branding` でアプリ名、サポートメールなどを入力する
+5. `Audience` で公開範囲を選ぶ
+   - 試験中は `External` とTest usersを設定
+   - 一般公開前に必要な公開状態と審査要否を確認
+6. `Clients` → `Create Client` を押す
+7. Application typeは `Web application`
+8. `Authorized JavaScript origins` へ次を追加する
+
+```text
+http://localhost:5173
+https://mapalbum-japan-2026.noguo22.chatgpt.site
+```
+
+9. `Authorized redirect URIs` へSupabase画面からコピーしたCallback URLを追加する
+10. Googleが発行したClient IDとClient Secretをコピーする
+11. SupabaseのGoogle Provider画面へClient IDとClient Secretを貼り付ける
+12. Google ProviderをONにし、`Save` を押す
 
 SupabaseのCallback URLは通常、次の形式です。
 
@@ -171,82 +287,97 @@ SupabaseのCallback URLは通常、次の形式です。
 https://あなたのプロジェクトID.supabase.co/auth/v1/callback
 ```
 
-公開URLはGoogle Cloud Consoleの「承認済みのJavaScript生成元」にも追加してください。
+Googleの `Authorized JavaScript origins` には `/` より後のパスや `/**` を付けません。`Authorized redirect URIs` にはMapAlbumの公開URLではなく、必ずSupabaseのCallback URLを登録します。
 
-### 2-5. Appleログインを設定
+### 2-7. Appleログインを設定
 
-Web版のAppleログインにはApple Developer Programのアカウントが必要です。
+Web版のAppleログインには有料のApple Developer Programアカウントが必要です。Apple設定が未完了でも、メールとGoogleログインは使用できます。
 
-1. [Apple Developer](https://developer.apple.com/account/)の `Certificates, Identifiers & Profiles` を開く
-2. `Identifiers` でApp IDを作成し、`Sign in with Apple` Capabilityを有効にする
-3. Web用のServices IDを作成する
-4. Services IDの `Sign in with Apple` 設定で、Primary App IDを関連付ける
-5. Website DomainへSupabaseプロジェクトのドメインを登録する
+1. Supabaseの `Authentication` → `Providers` → `Apple` を開いておく
+2. [Apple Developer](https://developer.apple.com/account/)の `Certificates, Identifiers & Profiles` を開く
+3. `Identifiers` → `App IDs` でApp IDを作成する
+4. App IDのCapabilitiesで `Sign in with Apple` をONにする
+5. `Identifiers` → `Services IDs` でWeb用Services IDを作成する
+   - 例: `com.example.mapalbum.web`
+   - このServices IDがSupabaseへ入力するClient IDになる
+6. Services IDの `Sign in with Apple` → `Configure` を開く
+7. Primary App IDへ手順3のApp IDを関連付ける
+8. `Domains and Subdomains` へSupabaseプロジェクトのドメインを登録する
 
 ```text
 あなたのプロジェクトID.supabase.co
 ```
 
-6. Return URLへSupabaseのCallback URLを登録する
+9. `Return URLs` へSupabaseのCallback URLを登録する
 
 ```text
 https://あなたのプロジェクトID.supabase.co/auth/v1/callback
 ```
 
-7. Apple Developerの `Keys` でSign in with Apple用キーを作り、`.p8` ファイルを安全に保存する
-8. Team ID、Key ID、Services ID、`.p8`を使ってApple Client Secretを生成する
-9. Supabaseの `Authentication` → `Providers` → `Apple` を開く
-10. Services IDをClient IDとして入力し、生成したSecretを入力して有効化する
+10. `Keys` で新しいKeyを作成し、`Sign in with Apple` を有効にする
+11. `.p8` ファイルをダウンロードする。再ダウンロードできないため安全に保管する
+12. 次の4項目を控える
+    - Team ID
+    - Key ID
+    - Services ID
+    - `.p8` の内容
+13. [Supabase公式Apple設定ページ](https://supabase.com/docs/guides/auth/social-login/auth-apple)のSecret生成ツールをChromeまたはFirefoxで開く
+14. 上の値を使いApple Client Secretを生成する
+15. SupabaseのApple Provider画面で次を入力する
+    - Client IDs: Services ID。複数ある場合はWeb用Services IDを最初にする
+    - Secret Key: 生成したApple Client Secret
+16. Apple ProviderをONにし、`Save` を押す
 
 AppleのWeb OAuth用Client Secretは6か月ごとの更新が必要です。期限切れ前に更新する予定を必ず登録してください。Apple OAuthでは氏名が返らない場合があるため、MapAlbumはメールアドレスの先頭部分を表示名の初期値として使用します。
 
-### 2-6. アプリへSupabase接続情報を設定
+### 2-8. 公開環境の環境変数へ設定
 
-Supabaseで `Project Settings` → `Data API` または `API` を開き、次を確認します。
+`.env.local` はWindows上の開発用です。公開サイトでは、利用しているホスティングサービスにも同じ2つの環境変数を登録し、登録後に再ビルド／再デプロイします。
 
-- Project URL
-- anon / publishable key
+Cloudflare Pages:
 
-`service_role` キーはブラウザーアプリへ絶対に入力しないでください。招待メール用Edge Functionも呼び出しユーザーのJWTとRLSで動作するため、`service_role` キーを追加設定する必要はありません。
+1. Cloudflare Dashboardで対象Pagesプロジェクトを開く
+2. `Settings` → `Variables and Secrets`
+3. Productionへ次の2項目を追加する
+4. Preview環境も使う場合は同じ値を追加する
+5. 新しいDeploymentを実行する
 
-MapAlbumフォルダーで `.env.example` をコピーして `.env.local` を作成します。
+Vercel:
 
-PowerShell:
+1. Vercelで対象Projectを開く
+2. `Settings` → `Environment Variables`
+3. Productionへ次の2項目を追加する
+4. Preview／Developmentも使う場合は対象へチェックを入れる
+5. `Redeploy` を実行する
 
-```powershell
-Copy-Item .env.example .env.local
+登録する値:
+
+```text
+VITE_SUPABASE_URL = https://abcdefghijklmnop.supabase.co
+VITE_SUPABASE_ANON_KEY = sb_publishable_xxxxxxxxxxxxxxxxx
 ```
 
-`.env.local` をVisual Studio Codeで開き、次のように変更します。
+Viteの `VITE_` 変数はJavaScriptへ組み込まれるビルド時変数です。変数を追加しただけでは古い公開ファイルは変わらないため、必ず再ビルド／再デプロイしてください。Publishable Keyは公開前提ですが、RLSが安全性を担うため、RLSを無効化してはいけません。
 
-```env
-VITE_SUPABASE_URL=https://xxxxxxxxxxxx.supabase.co
-VITE_SUPABASE_ANON_KEY=ここにanonまたはpublishableキー
-```
+現在のCodex Sites版へ接続する場合も、同じ2値を設定した状態で本番ビルドを作り直す必要があります。値を取得したら、MapAlbumのCodexタスクへ「このSupabase Project URLとPublishable Keyを設定して再公開」と依頼できます。
 
-開発画面を再起動します。
-
-```powershell
-npm run dev
-```
-
-ログイン画面からユーザー登録できれば接続完了です。
-
-### 2-7. 認証URLを設定
+### 2-9. リダイレクトURLを設定
 
 Supabaseの `Authentication` → `URL Configuration` で設定します。
 
-開発時:
+`Site URL` には利用者が通常開く本番URLを設定します。
 
 ```text
 Site URL:
-http://localhost:5173
+https://mapalbum-japan-2026.noguo22.chatgpt.site
 
 Redirect URLs:
 http://localhost:5173/**
+https://mapalbum-japan-2026.noguo22.chatgpt.site/
+https://mapalbum-japan-2026.noguo22.chatgpt.site/**
 ```
 
-公開後はCloudflare PagesまたはVercelのURLも追加します。
+Cloudflare Pages、Vercel、独自ドメインへ公開する場合は、実際のURLも追加します。
 
 例:
 
@@ -256,9 +387,24 @@ https://mapalbum.vercel.app/**
 https://あなたの独自ドメイン/**
 ```
 
-Email Verification、パスワード再設定、Googleログイン、Appleログインはすべてこの許可リストを使用します。ログイン後に別の画面へ移動する場合は、このURL設定を最初に確認してください。
+`Site URL` は1つだけです。`Redirect URLs` は複数追加できます。MapAlbumはメール確認、パスワード再設定、Google／Appleログイン、招待リンクのクエリ文字列を使用するため、ローカルと本番の `/**` も登録します。
 
-### 2-8. メールアドレス招待を設定
+設定後の確認:
+
+1. `Save` を押す
+2. 新しいシークレットウィンドウでMapAlbumを開く
+3. 新規登録メールのリンクを開き、MapAlbumへ戻ることを確認する
+4. パスワード再設定メールでもMapAlbumへ戻ることを確認する
+5. Google／Appleログイン後に `localhost` やSupabase Dashboardへ留まらないことを確認する
+
+OAuthが `redirect_uri_mismatch` になる場合:
+
+- SupabaseのRedirect URLs: ログイン完了後に戻るMapAlbumのURL
+- Google／Apple側のCallback／Return URL: `https://PROJECT_REF.supabase.co/auth/v1/callback`
+
+この2種類を入れ替えないでください。
+
+### 2-10. メールアドレス招待を設定（任意）
 
 招待URL、QRコード、招待コードはSQL設定だけで利用できます。画面の「メールアドレスで招待」から実際にメールを送るには、Supabase Edge Functionとメール配信サービスResendを設定します。
 
@@ -303,7 +449,7 @@ Resend未設定でも、メール招待の作成後に専用招待URLをコピ�
 
 メール専用URLは14日間有効で、招待先とSupabase Authの確認済みメールアドレスが一致する場合だけ申請できます。プロフィール画面のメール文字列を書き換えても一致判定には使われません。共通URL、QRコード、招待コードからの申請は初期状態で「メンバー」ですが、承認時に変更できます。どの方法でも、承認前にアルバムや写真を閲覧することはできません。
 
-### 2-9. RLSとPrivate Storageを確認
+### 2-11. RLSポリシーとPrivate Storageを確認
 
 `supabase/schema.sql` は次の防御を設定します。
 
@@ -317,20 +463,85 @@ Resend未設定でも、メール招待の作成後に専用招待URLをコピ�
 - Storageの閲覧・投稿・削除にもアルバム権限を適用し、不正なパス文字列は拒否
 - 写真表示には1時間だけ有効な署名付きURLを使用
 
+#### DashboardでRLSを確認
+
+1. Supabase左メニューの `Table Editor` を開く
+2. `profiles` を選び、RLSがEnabledになっていることを確認する
+3. 残りの5テーブルも同様に確認する
+4. `Database` → `Policies` を開く
+5. MapAlbumの各テーブルに `authenticated` 向けポリシーが表示されることを確認する
+6. `anon` や `public` に対して `true` を返す「全員許可」ポリシーがないことを確認する
+
+RLSのスイッチをONにするだけではデータへアクセスできません。`schema.sql` はRLSと同時に、アルバム所属・役割・投稿者を確認するポリシーと必要最小限のTable Grantを作成します。Dashboardのテンプレートで別のポリシーを追加しないでください。
+
+#### Storage Bucketを確認
+
+`schema.sql` がBucketとStorageポリシーを自動作成します。手動作成は通常不要です。
+
+1. Supabase左メニューの `Storage` を開く
+2. Buckets一覧に `album-photos` があることを確認する
+3. `album-photos` を開き、`Public bucket` がOFFであることを確認する
+4. Bucket設定でファイルサイズ上限が15MB、許可MIME Typeが画像形式になっていることを確認する
+5. `Storage` のPolicies画面で次の3種類があることを確認する
+   - アルバムメンバーの読取
+   - owner／admin／memberの投稿
+   - 投稿者本人またはowner／adminの削除
+
+Bucketが見つからない場合は、Storage画面から別名で作らず `supabase/schema.sql` 全体を再実行してください。名前は必ず小文字の `album-photos` です。PublicをONにするとURLを知る未ログイン利用者が写真へアクセスできるため、ONにしないでください。
+
 SQL Editorで次を実行すると、RLSとStorage設定を確認できます。
 
 ```sql
-select schemaname, tablename, rowsecurity
+select tablename, rowsecurity
 from pg_tables
 where schemaname = 'public'
+  and tablename in (
+    'profiles',
+    'albums',
+    'album_members',
+    'photos',
+    'album_invitations',
+    'album_join_requests'
+  )
 order by tablename;
 
-select id, name, public
+select tablename, count(*) as policy_count
+from pg_policies
+where schemaname = 'public'
+  and tablename in (
+    'profiles',
+    'albums',
+    'album_members',
+    'photos',
+    'album_invitations',
+    'album_join_requests'
+  )
+group by tablename
+order by tablename;
+
+select id, name, public, file_size_limit, allowed_mime_types
 from storage.buckets
 where id = 'album-photos';
+
+select policyname, cmd, roles
+from pg_policies
+where schemaname = 'storage'
+  and tablename = 'objects'
+  and (
+    coalesce(qual, '') ilike '%album-photos%'
+    or coalesce(with_check, '') ilike '%album-photos%'
+  )
+order by policyname;
 ```
 
-6テーブルの `rowsecurity` がすべて `true`、`album-photos` の `public` が `false` なら正しく設定されています。
+確認結果:
+
+- 1つ目: 6行すべての `rowsecurity` が `true`
+- 2つ目: 6テーブルすべてに1件以上のPolicy
+- 3つ目: `album-photos` が1行、`public` が `false`
+- 4つ目: MapAlbum用Storage Policyが3件
+
+どれかが不足している場合は、そのまま公開せず `supabase/schema.sql` 全体を再実行し、SQL Editorの最初のエラーを確認してください。
 
 確認後、次のテストを行ってください。
 
@@ -343,13 +554,95 @@ where id = 'album-photos';
 7. オーナー／管理者だけが申請を承認できる
 8. メール専用URLは別メールアドレスのアカウントでは申請できない
 
+### 2-12. Supabase接続チェックリスト
+
+上から順に確認し、すべてにチェックが付いてから家族や友だちを招待してください。
+
+#### プロジェクトとキー
+
+- [ ] Supabaseプロジェクトが作成済みで、Project Overviewを開ける
+- [ ] 主な利用者に近いリージョンを選択した
+- [ ] Database Passwordを安全な場所へ保管し、`.env.local` へは入れていない
+- [ ] Project URLを取得した
+- [ ] `sb_publishable_` で始まるPublishable Keyを取得した
+- [ ] `sb_secret_`、`service_role` をブラウザー用環境変数へ入れていない
+
+#### 環境変数
+
+- [ ] `.env.local` に `VITE_SUPABASE_URL` を設定した
+- [ ] `.env.local` に `VITE_SUPABASE_ANON_KEY` を設定した
+- [ ] URL末尾の余分な `/`、引用符、空白がない
+- [ ] 開発サーバーを再起動し、未設定警告が消えた
+- [ ] Cloudflare Pages／Vercel／Codex Sitesなど本番環境にも同じ2値を設定した
+- [ ] 環境変数設定後に再ビルド／再デプロイした
+
+#### SQL・RLS・Storage
+
+- [ ] `supabase/schema.sql` の一部ではなくファイル全体を実行した
+- [ ] `profiles`、`albums`、`album_members`、`photos`、`album_invitations`、`album_join_requests` が存在する
+- [ ] 6テーブルすべてでRLSがEnabled
+- [ ] Policyが `authenticated` とアルバム権限を検証している
+- [ ] `anon` 向けの全件許可Policyを追加していない
+- [ ] `album-photos` Bucketが存在する
+- [ ] `album-photos` のPublicがOFF
+- [ ] `storage.objects` に読取・投稿・削除の3つのMapAlbum Policyがある
+
+#### メール認証とURL
+
+- [ ] Email ProviderがEnabled
+- [ ] `Allow new users to sign up` がEnabled
+- [ ] `Confirm email` がEnabled
+- [ ] Confirm signupとReset passwordのEmail Templateを確認した
+- [ ] 本番運用ではCustom SMTPを設定した
+- [ ] Site URLに本番MapAlbum URLを設定した
+- [ ] Redirect URLsへ `http://localhost:5173/**` を追加した
+- [ ] Redirect URLsへ本番MapAlbum URLを追加した
+- [ ] 確認メールとパスワード再設定メールからMapAlbumへ戻れる
+
+#### Googleログイン
+
+- [ ] Google Auth PlatformでWeb applicationのOAuth Clientを作成した
+- [ ] Authorized JavaScript originsへローカルと本番のOriginを追加した
+- [ ] Authorized redirect URIsへSupabase Callback URLを追加した
+- [ ] Client IDとClient SecretをSupabase Google Providerへ保存した
+- [ ] Google ProviderがEnabled
+- [ ] Testing状態なら使用するGoogleアカウントをTest usersへ追加した
+
+#### Appleログイン
+
+- [ ] Apple Developer Programへ加入済み
+- [ ] Sign in with Appleを有効にしたApp IDがある
+- [ ] Web用Services IDがある
+- [ ] Services IDのDomainへSupabaseドメインを追加した
+- [ ] Return URLへSupabase Callback URLを追加した
+- [ ] `.p8`、Team ID、Key IDを安全に保管した
+- [ ] Web用Services IDをSupabase Apple Providerの先頭Client IDへ設定した
+- [ ] Apple Client Secretを設定してProviderをEnabledにした
+- [ ] Client Secret更新用の6か月ごとの予定を登録した
+
+#### 最終動作確認
+
+- [ ] 新しいメールアドレスで登録すると確認メールが届く
+- [ ] メール未確認ではログインできない
+- [ ] メール確認後にログインできる
+- [ ] ログアウト後はアルバムや写真が表示されない
+- [ ] GoogleとAppleでログインできる
+- [ ] アルバムを作成できる
+- [ ] iPhoneから写真を投稿し、Private Storageへ保存される
+- [ ] 別ユーザーは承認前にアルバムを閲覧できない
+- [ ] viewerは写真を投稿・編集できない
+
 公式資料:
 
+- [Supabase API Keys](https://supabase.com/docs/guides/getting-started/api-keys)
+- [Redirect URLs](https://supabase.com/docs/guides/auth/redirect-urls)
+- [Custom SMTP](https://supabase.com/docs/guides/auth/auth-smtp)
 - [Supabase Auth JavaScript](https://supabase.com/docs/reference/javascript/auth)
 - [パスワード再設定](https://supabase.com/docs/reference/javascript/auth-resetpasswordforemail)
 - [Googleログイン](https://supabase.com/docs/guides/auth/social-login/auth-google)
 - [Appleログイン](https://supabase.com/docs/guides/auth/social-login/auth-apple)
 - [Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)
+- [Storage Buckets](https://supabase.com/docs/guides/storage/buckets/fundamentals)
 - [Storage Access Control](https://supabase.com/docs/guides/storage/security/access-control)
 - [Edge Functions](https://supabase.com/docs/guides/functions)
 - [Edge Functionの環境変数](https://supabase.com/docs/guides/functions/secrets)
