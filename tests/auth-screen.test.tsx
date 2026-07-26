@@ -14,7 +14,6 @@ function authProps(recoveryMode = false) {
     onPasswordResetRequest: vi.fn(async () => {}),
     onPasswordUpdate: vi.fn(async () => {}),
     onGoogleLogin: vi.fn(async () => {}),
-    onAppleLogin: vi.fn(async () => {}),
   };
 }
 
@@ -66,16 +65,6 @@ describe("認証画面", () => {
     expect(props.onGoogleLogin).toHaveBeenCalledOnce();
   });
 
-  it("Appleログインを開始する", async () => {
-    const user = userEvent.setup();
-    const props = authProps();
-    render(<AuthScreen {...props} />);
-
-    await user.click(screen.getByRole("button", { name: "Appleで続ける" }));
-
-    expect(props.onAppleLogin).toHaveBeenCalledOnce();
-  });
-
   it("05 パスワード再設定メールを要求する", async () => {
     const user = userEvent.setup();
     const props = authProps();
@@ -110,6 +99,5 @@ describe("認証画面", () => {
       screen.getAllByRole("button", { name: /^ログイン/ }).at(-1),
     ).toBeDisabled();
     expect(screen.getByRole("button", { name: "Googleで続ける" })).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Appleで続ける" })).toBeDisabled();
   });
 });

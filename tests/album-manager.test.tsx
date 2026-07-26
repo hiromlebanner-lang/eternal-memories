@@ -10,10 +10,12 @@ it("06 アルバムを作成して入力値を渡す", async () => {
   render(
     <AlbumManager
       albums={[]}
+      currentUserID="user-1"
       onClose={onClose}
       onSelect={vi.fn()}
       onCreate={onCreate}
       onJoin={vi.fn(async () => {})}
+      onDelete={vi.fn(async () => {})}
     />,
   );
 
@@ -40,10 +42,12 @@ it("Supabaseの構造化エラーを省略せず表示する", async () => {
   render(
     <AlbumManager
       albums={[]}
+      currentUserID="user-1"
       onClose={vi.fn()}
       onSelect={vi.fn()}
       onCreate={onCreate}
       onJoin={vi.fn(async () => {})}
+      onDelete={vi.fn(async () => {})}
     />,
   );
 

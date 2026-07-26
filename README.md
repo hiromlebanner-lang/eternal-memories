@@ -10,7 +10,6 @@ React、TypeScript、Vite、Leaflet、Supabaseで作られています。Windows
 - 登録メールの確認（Email Verification）
 - パスワード再設定メールと新しいパスワードの登録
 - Googleログイン
-- Appleログイン
 - ログイン状態の保持とログアウト
 - 共有アルバムの作成
 - メールアドレス・招待URL・QRコード・招待コードによる参加申請
@@ -312,48 +311,7 @@ https://あなたのプロジェクトID.supabase.co/auth/v1/callback
 
 Googleの `Authorized JavaScript origins` には `/` より後のパスや `/**` を付けません。`Authorized redirect URIs` にはMapAlbumの公開URLではなく、必ずSupabaseのCallback URLを登録します。
 
-### 2-7. Appleログインを設定
-
-Web版のAppleログインには有料のApple Developer Programアカウントが必要です。Apple設定が未完了でも、メールとGoogleログインは使用できます。
-
-1. Supabaseの `Authentication` → `Providers` → `Apple` を開いておく
-2. [Apple Developer](https://developer.apple.com/account/)の `Certificates, Identifiers & Profiles` を開く
-3. `Identifiers` → `App IDs` でApp IDを作成する
-4. App IDのCapabilitiesで `Sign in with Apple` をONにする
-5. `Identifiers` → `Services IDs` でWeb用Services IDを作成する
-   - 例: `com.example.mapalbum.web`
-   - このServices IDがSupabaseへ入力するClient IDになる
-6. Services IDの `Sign in with Apple` → `Configure` を開く
-7. Primary App IDへ手順3のApp IDを関連付ける
-8. `Domains and Subdomains` へSupabaseプロジェクトのドメインを登録する
-
-```text
-あなたのプロジェクトID.supabase.co
-```
-
-9. `Return URLs` へSupabaseのCallback URLを登録する
-
-```text
-https://あなたのプロジェクトID.supabase.co/auth/v1/callback
-```
-
-10. `Keys` で新しいKeyを作成し、`Sign in with Apple` を有効にする
-11. `.p8` ファイルをダウンロードする。再ダウンロードできないため安全に保管する
-12. 次の4項目を控える
-    - Team ID
-    - Key ID
-    - Services ID
-    - `.p8` の内容
-13. [Supabase公式Apple設定ページ](https://supabase.com/docs/guides/auth/social-login/auth-apple)のSecret生成ツールをChromeまたはFirefoxで開く
-14. 上の値を使いApple Client Secretを生成する
-15. SupabaseのApple Provider画面で次を入力する
-    - Client IDs: Services ID。複数ある場合はWeb用Services IDを最初にする
-    - Secret Key: 生成したApple Client Secret
-16. Apple ProviderをONにし、`Save` を押す
-
-AppleのWeb OAuth用Client Secretは6か月ごとの更新が必要です。期限切れ前に更新する予定を必ず登録してください。Apple OAuthでは氏名が返らない場合があるため、MapAlbumはメールアドレスの先頭部分を表示名の初期値として使用します。
-
-### 2-8. 公開環境の環境変数へ設定
+### 2-7. 公開環境の環境変数へ設定
 
 `.env.local` はWindows上の開発用です。公開サイトでは、利用しているホスティングサービスにも同じ3つの環境変数を登録し、登録後に再ビルド／再デプロイします。
 
@@ -385,7 +343,7 @@ Viteの `VITE_` 変数はJavaScriptへ組み込まれるビルド時変数です
 
 現在のCodex Sites版へ接続する場合も、同じ3値を設定した状態で本番ビルドを作り直す必要があります。VAPID鍵をまだ作っていない場合は、アプリ内通知だけを先に利用できます。
 
-### 2-9. リダイレクトURLを設定
+### 2-8. リダイレクトURLを設定
 
 Supabaseの `Authentication` → `URL Configuration` で設定します。
 
@@ -411,7 +369,7 @@ https://mapalbum.vercel.app/**
 https://あなたの独自ドメイン/**
 ```
 
-`Site URL` は1つだけです。`Redirect URLs` は複数追加できます。MapAlbumはメール確認、パスワード再設定、Google／Appleログイン、招待リンクのクエリ文字列を使用するため、ローカルと本番の `/**` も登録します。
+`Site URL` は1つだけです。`Redirect URLs` は複数追加できます。MapAlbumはメール確認、パスワード再設定、Googleログイン、招待リンクのクエリ文字列を使用するため、ローカルと本番の `/**` も登録します。
 
 設定後の確認:
 
@@ -419,16 +377,16 @@ https://あなたの独自ドメイン/**
 2. 新しいシークレットウィンドウでMapAlbumを開く
 3. 新規登録メールのリンクを開き、MapAlbumへ戻ることを確認する
 4. パスワード再設定メールでもMapAlbumへ戻ることを確認する
-5. Google／Appleログイン後に `localhost` やSupabase Dashboardへ留まらないことを確認する
+5. Googleログイン後に `localhost` やSupabase Dashboardへ留まらないことを確認する
 
 OAuthが `redirect_uri_mismatch` になる場合:
 
 - SupabaseのRedirect URLs: ログイン完了後に戻るMapAlbumのURL
-- Google／Apple側のCallback／Return URL: `https://PROJECT_REF.supabase.co/auth/v1/callback`
+- Google側のCallback URL: `https://PROJECT_REF.supabase.co/auth/v1/callback`
 
 この2種類を入れ替えないでください。
 
-### 2-10. メールアドレス招待を設定（任意）
+### 2-9. メールアドレス招待を設定（任意）
 
 招待URL、QRコード、招待コードはSQL設定だけで利用できます。画面の「メールアドレスで招待」から実際にメールを送るには、Supabase Edge Functionとメール配信サービスResendを設定します。
 
@@ -473,7 +431,7 @@ Resend未設定でも、メール招待の作成後に専用招待URLをコピ�
 
 メール専用URLは14日間有効で、招待先とSupabase Authの確認済みメールアドレスが一致する場合だけ申請できます。プロフィール画面のメール文字列を書き換えても一致判定には使われません。共通URL、QRコード、招待コードからの申請は初期状態で「メンバー」ですが、承認時に変更できます。どの方法でも、承認前にアルバムや写真を閲覧することはできません。
 
-### 2-11. RLSポリシーとPrivate Storageを確認
+### 2-10. RLSポリシーとPrivate Storageを確認
 
 `supabase/schema.sql` は次の防御を設定します。
 
@@ -581,13 +539,13 @@ order by policyname;
 1. ログアウト状態でアルバムや写真が表示されない
 2. メール登録後、確認メールを開くまではログインできない
 3. パスワード再設定メールから新しいパスワードを登録できる
-4. GoogleとAppleの両方でログインできる
+4. Googleでログインできる
 5. アルバムに参加していない別ユーザーから写真を取得できない
 6. 招待リンクを開いても承認前はアルバムを閲覧できない
 7. オーナー／管理者だけが申請を承認できる
 8. メール専用URLは別メールアドレスのアカウントでは申請できない
 
-### 2-12. Supabase接続チェックリスト
+### 2-11. Supabase接続チェックリスト
 
 上から順に確認し、すべてにチェックが付いてから家族や友だちを招待してください。
 
@@ -644,25 +602,13 @@ order by policyname;
 - [ ] Google ProviderがEnabled
 - [ ] Testing状態なら使用するGoogleアカウントをTest usersへ追加した
 
-#### Appleログイン
-
-- [ ] Apple Developer Programへ加入済み
-- [ ] Sign in with Appleを有効にしたApp IDがある
-- [ ] Web用Services IDがある
-- [ ] Services IDのDomainへSupabaseドメインを追加した
-- [ ] Return URLへSupabase Callback URLを追加した
-- [ ] `.p8`、Team ID、Key IDを安全に保管した
-- [ ] Web用Services IDをSupabase Apple Providerの先頭Client IDへ設定した
-- [ ] Apple Client Secretを設定してProviderをEnabledにした
-- [ ] Client Secret更新用の6か月ごとの予定を登録した
-
 #### 最終動作確認
 
 - [ ] 新しいメールアドレスで登録すると確認メールが届く
 - [ ] メール未確認ではログインできない
 - [ ] メール確認後にログインできる
 - [ ] ログアウト後はアルバムや写真が表示されない
-- [ ] GoogleとAppleでログインできる
+- [ ] Googleでログインできる
 - [ ] アルバムを作成できる
 - [ ] iPhoneから写真を投稿し、Private Storageへ保存される
 - [ ] 別ユーザーは承認前にアルバムを閲覧できない
@@ -676,7 +622,6 @@ order by policyname;
 - [Supabase Auth JavaScript](https://supabase.com/docs/reference/javascript/auth)
 - [パスワード再設定](https://supabase.com/docs/reference/javascript/auth-resetpasswordforemail)
 - [Googleログイン](https://supabase.com/docs/guides/auth/social-login/auth-google)
-- [Appleログイン](https://supabase.com/docs/guides/auth/social-login/auth-apple)
 - [Row Level Security](https://supabase.com/docs/guides/database/postgres/row-level-security)
 - [Storage Buckets](https://supabase.com/docs/guides/storage/buckets/fundamentals)
 - [Storage Access Control](https://supabase.com/docs/guides/storage/security/access-control)
@@ -833,7 +778,7 @@ VercelのURLを「リダイレクトURI」へ入れず、SupabaseのCallback URL
 
 1. 新規登録メールのリンクからVercel版へ戻れる
 2. パスワード再設定メールからVercel版へ戻れる
-3. Google／Appleログイン後にVercel版へ戻れる
+3. Googleログイン後にVercel版へ戻れる
 4. ログアウト後にアルバムや写真が表示されない
 
 ### 3-7. iPhoneのSafariで開く
@@ -899,7 +844,7 @@ PWAは更新を自動確認します。ホーム画面版がすぐに変わら�
 - [ ] SupabaseのRedirect URLsへVercel本番URLを追加した
 - [ ] 新規登録・メール確認・ログイン・ログアウトを確認した
 - [ ] パスワード再設定後にVercel版へ戻れる
-- [ ] Google／Appleログイン後にVercel版へ戻れる
+- [ ] Googleログイン後にVercel版へ戻れる
 - [ ] iPhone Safariでカメラ・写真・位置情報を許可できた
 - [ ] ホーム画面からMapAlbumを単独起動できた
 
@@ -1042,7 +987,6 @@ PWAとして使う段階ではMacやXcodeは不要です。App Storeへの最終
 - `service_role` キーをブラウザーへ設定しない
 - SupabaseのRLSを無効にしない
 - Email Providerの `Confirm email` を無効にしない
-- Apple Client Secretを6か月ごとに更新する
 - Supabase Authの本番メール送信には独自SMTPを設定する
 - 不要になったメンバーはアルバムから削除する
 - 正確な緯度経度がメンバーへ共有されることを利用者へ説明する
@@ -1078,7 +1022,7 @@ Console errors: 0
 Console warnings: 0
 ```
 
-ローカルProduction Previewでは、ログイン、新規登録、パスワード再設定の各画面、Supabase未設定時の警告と認証ボタン無効化を実ブラウザーで確認しました。未ログイン状態ではアルバム、写真、地図、設定画面はDOM上にも表示されません。Google／Apple OAuth、写真のStorage保存とDB登録、写真一覧、共有URL／QR、ログアウト時のPrivate Cache削除も自動テストで確認しています。
+ローカルProduction Previewでは、ログイン、新規登録、パスワード再設定の各画面、Supabase未設定時の警告と認証ボタン無効化を実ブラウザーで確認しました。未ログイン状態ではアルバム、写真、地図、設定画面はDOM上にも表示されません。Google OAuth、写真のStorage保存とDB登録、写真一覧、共有URL／QR、ログアウト時のPrivate Cache削除も自動テストで確認しています。
 
 ### 項目別結果
 
@@ -1106,7 +1050,7 @@ iPhoneのカメラ／GPSを使う確認が必要な項目です。既存環境�
 
 - Viteの単一JavaScriptファイルが大きく、Production Buildにサイズ警告が出る問題
 - React／TypeScriptプロジェクトにNext.js用ESLint設定が残り、Lintを実行できない問題
-- 写真一覧、Google／Apple OAuth、Storage失敗時ロールバックの回帰テスト不足
+- 写真一覧、Google OAuth、Storage失敗時ロールバックの回帰テスト不足
 - 写真削除後に詳細画面の選択位置が範囲外になる可能性
 - 招待メール件名に制御文字を含められる問題
 - 写真を選び直した際に、前の写真のEXIF位置・撮影日時が残る問題

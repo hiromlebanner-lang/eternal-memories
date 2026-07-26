@@ -6,6 +6,7 @@ import {
   LocateFixed,
   MapPin,
   Navigation,
+  Trash2,
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import {
@@ -17,24 +18,38 @@ import {
 } from "react-leaflet";
 import { getCurrentPosition } from "../lib/location";
 import { readPhotoMetadata } from "../lib/image";
-import type { AlbumPhoto, PhotoCategory } from "../types";
+import type {
+  AlbumPhoto,
+  PhotoCategory,
+  PhotoUploadFailure,
+} from "../types";
 import { CATEGORY_META } from "../types";
 import { Modal } from "./Modal";
 import { MapAttribution } from "./MapAttribution";
 
 interface PhotoEditorValues {
-  file?: File;
+  files?: File[];
+  title: string;
   caption: string;
   category: PhotoCategory;
   capturedAt: string;
   latitude: number;
   longitude: number;
+  visibility: "album_only" | "global";
 }
 
 interface PhotoEditorProps {
   photo?: AlbumPhoto;
   onClose: () => void;
-  onSave: (values: PhotoEditorValues) => Promise<void>;
+  onSave: (
+    values: PhotoEditorValues,
+    onProgress: (completed: number, total: number) => void,
+  ) => Promise<PhotoUploadFailure[]>;
+}
+
+interface SelectedFile {
+  file: File;
+  previewURL: string;
 }
 
 function toInputDate(value: string | Date) {
@@ -68,11 +83,16 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
   const cameraInput = useRef<HTMLInputElement>(null);
   const libraryInput = useRef<HTMLInputElement>(null);
   const selectionRequest = useRef(0);
+  const selectedFilesRef = useRef<SelectedFile[]>([]);
 
-  const [file, setFile] = useState<File>();
-  const [previewURL, setPreviewURL] = useState(photo?.image_url ?? "");
+  const [selectedFiles, setSelectedFiles] = useState<SelectedFile[]>([]);
+  const [activeIndex, setActiveIndex] = useState(0);
+  const [title, setTitle] = useState(photo?.title ?? "");
   const [caption, setCaption] = useState(photo?.caption ?? "");
   const [category, setCategory] = useState<PhotoCategory>(photo?.category ?? "scenery");
+  const [visibility, setVisibility] = useState<"album_only" | "global">(
+    photo?.visibility === "global" ? "global" : "album_only",
+  );
   const [capturedAt, setCapturedAt] = useState(
     toInputDate(photo?.captured_at ?? new Date()),
   );
@@ -80,13 +100,23 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
   const [longitude, setLongitude] = useState<number | null>(photo?.longitude ?? null);
   const [locating, setLocating] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [uploadProgress, setUploadProgress] = useState({ completed: 0, total: 0 });
   const [error, setError] = useState("");
+
+  const activeSelection = selectedFiles[activeIndex];
+  const previewURL = photo?.image_url ?? activeSelection?.previewURL ?? "";
+
+  useEffect(() => {
+    selectedFilesRef.current = selectedFiles;
+  }, [selectedFiles]);
 
   useEffect(
     () => () => {
-      if (file && previewURL.startsWith("blob:")) URL.revokeObjectURL(previewURL);
+      selectedFilesRef.current.forEach((item) =>
+        URL.revokeObjectURL(item.previewURL),
+      );
     },
-    [file, previewURL],
+    [],
   );
 
   const marker = useMemo(
@@ -104,9 +134,6 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
     if (!selected) return;
     const requestID = ++selectionRequest.current;
     setError("");
-    setFile(selected);
-    if (previewURL.startsWith("blob:")) URL.revokeObjectURL(previewURL);
-    setPreviewURL(URL.createObjectURL(selected));
     setCapturedAt(toInputDate(new Date()));
     setLatitude(null);
     setLongitude(null);
@@ -134,6 +161,54 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
     }
   };
 
+  const addFiles = async (fileList?: FileList | null) => {
+    if (!fileList?.length) return;
+    const known = new Set(
+      selectedFiles.map(
+        ({ file: selected }) =>
+          `${selected.name}:${selected.size}:${selected.lastModified}`,
+      ),
+    );
+    const additions = Array.from(fileList).filter((selected) => {
+      const key = `${selected.name}:${selected.size}:${selected.lastModified}`;
+      if (known.has(key)) return false;
+      known.add(key);
+      return true;
+    });
+    if (selectedFiles.length + additions.length > 20) {
+      setError("一度に選択できる写真は20枚までです。");
+      return;
+    }
+    if (additions.length === 0) {
+      setError("同じ写真はすでに選択されています。");
+      return;
+    }
+    const next = [
+      ...selectedFiles,
+      ...additions.map((selected) => ({
+        file: selected,
+        previewURL: URL.createObjectURL(selected),
+      })),
+    ];
+    setSelectedFiles(next);
+    const nextIndex = selectedFiles.length;
+    setActiveIndex(nextIndex);
+    await chooseFile(next[nextIndex].file);
+  };
+
+  const removeSelectedFile = (index: number) => {
+    const target = selectedFiles[index];
+    if (!target) return;
+    URL.revokeObjectURL(target.previewURL);
+    const next = selectedFiles.filter((_, candidateIndex) => candidateIndex !== index);
+    setSelectedFiles(next);
+    setActiveIndex((current) => Math.min(current, Math.max(0, next.length - 1)));
+    if (next.length === 0) {
+      setLatitude(null);
+      setLongitude(null);
+    }
+  };
+
   const locateNow = async () => {
     setLocating(true);
     setError("");
@@ -150,7 +225,7 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
-    if (!photo && !file) {
+    if (!photo && selectedFiles.length === 0) {
       setError("写真を撮影するか、ライブラリから選択してください。");
       return;
     }
@@ -174,14 +249,39 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
     setError("");
     try {
       await onSave({
-        file,
+        files: photo ? undefined : selectedFiles.map((item) => item.file),
+        title: title.trim(),
         caption: caption.trim(),
         category,
         capturedAt: new Date(capturedAt).toISOString(),
         latitude,
         longitude,
+        visibility,
+      }, (completed, total) => {
+        setUploadProgress({ completed, total });
+      }).then((failures) => {
+        if (failures.length === 0) {
+          onClose();
+          return;
+        }
+        const failed = new Set(failures.map((failure) => failure.file));
+        setSelectedFiles((current) => {
+          current
+            .filter((item) => !failed.has(item.file))
+            .forEach((item) => URL.revokeObjectURL(item.previewURL));
+          return current.filter((item) => failed.has(item.file));
+        });
+        setActiveIndex(0);
+        setError(
+          [
+            `${selectedFiles.length}枚中 ${selectedFiles.length - failures.length}枚保存成功・${failures.length}枚失敗`,
+            ...failures.map(
+              (failure) => `${failure.file.name}: ${failure.reason}`,
+            ),
+            "失敗した写真だけ再試行できます。",
+          ].join("\n"),
+        );
       });
-      onClose();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "保存できませんでした。");
     } finally {
@@ -204,35 +304,78 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
           )}
 
           {!photo ? (
-            <div className="photo-source-actions">
-              <button type="button" onClick={() => cameraInput.current?.click()}>
-                <Camera size={18} />
-                撮影する
-              </button>
-              <button type="button" onClick={() => libraryInput.current?.click()}>
-                <ImagePlus size={18} />
-                写真を選ぶ
-              </button>
-              <input
-                ref={cameraInput}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                hidden
-                onChange={(event) => void chooseFile(event.target.files?.[0])}
-              />
-              <input
-                ref={libraryInput}
-                type="file"
-                accept="image/*"
-                hidden
-                onChange={(event) => void chooseFile(event.target.files?.[0])}
-              />
-            </div>
+            <>
+              <div className="photo-source-actions">
+                <button type="button" onClick={() => cameraInput.current?.click()}>
+                  <Camera size={18} />
+                  撮影する
+                </button>
+                <button type="button" onClick={() => libraryInput.current?.click()}>
+                  <ImagePlus size={18} />
+                  写真を選ぶ
+                </button>
+                <input
+                  ref={cameraInput}
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  hidden
+                  onChange={(event) => void addFiles(event.target.files)}
+                />
+                <input
+                  ref={libraryInput}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  hidden
+                  onChange={(event) => void addFiles(event.target.files)}
+                />
+              </div>
+              {selectedFiles.length > 0 ? (
+                <div className="selected-photo-list">
+                  <strong>{selectedFiles.length}枚選択中</strong>
+                  <div>
+                    {selectedFiles.map((item, index) => (
+                      <button
+                        key={`${item.file.name}:${item.file.lastModified}`}
+                        type="button"
+                        className={activeIndex === index ? "is-active" : ""}
+                        onClick={() => {
+                          setActiveIndex(index);
+                          void chooseFile(item.file);
+                        }}
+                      >
+                        <img src={item.previewURL} alt="" />
+                        <span
+                          role="button"
+                          aria-label={`${item.file.name}を選択から削除`}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            removeSelectedFile(index);
+                          }}
+                        >
+                          <Trash2 size={13} />
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </>
           ) : null}
         </div>
 
         <div className="photo-editor__fields">
+          <label className="field">
+            <span>タイトル</span>
+            <input
+              value={title}
+              onChange={(event) => setTitle(event.target.value)}
+              placeholder="思い出のタイトル"
+              maxLength={120}
+            />
+          </label>
+
           <label className="field">
             <span>コメント</span>
             <textarea
@@ -268,6 +411,33 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
                 );
               })}
             </div>
+          </fieldset>
+
+          <fieldset className="visibility-picker">
+            <legend>投稿先</legend>
+            <label>
+              <input
+                type="radio"
+                name="visibility"
+                checked={visibility === "album_only"}
+                onChange={() => setVisibility("album_only")}
+              />
+              このアルバムのみ
+            </label>
+            <label>
+              <input
+                type="radio"
+                name="visibility"
+                checked={visibility === "global"}
+                onChange={() => setVisibility("global")}
+              />
+              このアルバム＋みんなの思い出
+            </label>
+            {visibility === "global" ? (
+              <p>
+                この写真は、アルバムの参加者以外のログインユーザーにも表示されます。
+              </p>
+            ) : null}
           </fieldset>
 
           <label className="field">
@@ -329,9 +499,32 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
 
           {error ? <p className="form-message form-message--error">{error}</p> : null}
 
+          {saving && uploadProgress.total > 0 ? (
+            <div className="upload-progress" aria-live="polite">
+              <div>
+                <span
+                  style={{
+                    width: `${Math.round(
+                      (uploadProgress.completed / uploadProgress.total) * 100,
+                    )}%`,
+                  }}
+                />
+              </div>
+              <p>
+                {uploadProgress.completed} / {uploadProgress.total}枚をアップロード中
+              </p>
+            </div>
+          ) : null}
+
           <button className="primary-button" type="submit" disabled={saving || locating}>
             <Check size={18} />
-            {saving ? "保存しています…" : photo ? "変更を保存" : "アルバムに追加"}
+            {saving
+              ? uploadProgress.total > 0
+                ? `${uploadProgress.completed} / ${uploadProgress.total}枚をアップロード中`
+                : "保存しています…"
+              : photo
+                ? "変更を保存"
+                : "アルバムに追加"}
           </button>
           <p className="privacy-note">
             <MapPin size={14} />

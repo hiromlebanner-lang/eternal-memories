@@ -30,13 +30,20 @@ export function PhotoGrid({ photos, onSelect }: PhotoGridProps) {
             onClick={() => onSelect(photo)}
           >
             <div className="photo-card__image">
-              <img src={photo.image_url} alt={photo.caption || `${meta.label}の写真`} />
+              <img
+                src={photo.image_url}
+                alt={photo.caption || `${meta.label}の写真`}
+                loading="lazy"
+                decoding="async"
+              />
               <span className="photo-card__category" style={{ background: meta.color }}>
                 {meta.emoji}
               </span>
             </div>
             <div className="photo-card__body">
-              <strong>{photo.caption || `${meta.label}の思い出`}</strong>
+              <strong>
+                {photo.title || photo.caption || `${meta.label}の思い出`}
+              </strong>
               <span>
                 <CalendarDays size={13} />
                 {new Intl.DateTimeFormat("ja-JP", {

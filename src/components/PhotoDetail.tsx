@@ -97,6 +97,9 @@ export function PhotoDetail({
             <span>{meta.emoji}</span>
             {meta.label}
           </div>
+          {photo.title ? (
+            <h3 className="photo-detail__title">{photo.title}</h3>
+          ) : null}
           <p className="photo-detail__caption">
             {photo.caption || "この写真にはまだコメントがありません。"}
           </p>

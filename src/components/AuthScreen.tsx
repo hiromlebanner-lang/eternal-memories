@@ -26,7 +26,6 @@ interface AuthScreenProps {
   onPasswordResetRequest: (email: string) => Promise<void>;
   onPasswordUpdate: (password: string) => Promise<void>;
   onGoogleLogin: () => Promise<void>;
-  onAppleLogin: () => Promise<void>;
 }
 
 export function AuthScreen({
@@ -39,7 +38,6 @@ export function AuthScreen({
   onPasswordResetRequest,
   onPasswordUpdate,
   onGoogleLogin,
-  onAppleLogin,
 }: AuthScreenProps) {
   const [mode, setMode] = useState<AuthMode>("login");
   const [displayName, setDisplayName] = useState("");
@@ -96,7 +94,7 @@ export function AuthScreen({
             みんなの旅を、みんなの思い出に
           </span>
           <h1>
-            <span>思い出は、</span>
+            <span>思い出は</span>
             <span className="auth-title-detail">写真をひらくたびに色づいていく。</span>
           </h1>
           <p>
@@ -303,17 +301,6 @@ export function AuthScreen({
                 >
                   <Chrome size={19} />
                   Googleで続ける
-                </button>
-                <button
-                  className="secondary-button apple-auth-button"
-                  type="button"
-                  disabled={busy || !configured}
-                  onClick={() => void onAppleLogin()}
-                >
-                  <span className="apple-mark" aria-hidden="true">
-                    
-                  </span>
-                  Appleで続ける
                 </button>
               </div>
             </>

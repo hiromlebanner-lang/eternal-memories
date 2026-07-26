@@ -7,6 +7,7 @@ import {
   CircleUserRound,
   CloudOff,
   Grid2X2,
+  Globe2,
   LogOut,
   Map as MapIcon,
   Moon,
@@ -20,6 +21,14 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlbumManager } from "./components/AlbumManager";
+import {
+  AccountInfoMenu,
+  AccountInfoPage,
+  accountPageTitle,
+  accountRouteFromPath,
+  ACCOUNT_ROUTE_PATHS,
+} from "./components/AccountInfoPages";
+import type { AccountPageRoute } from "./components/AccountInfoPages";
 import { AuthScreen } from "./components/AuthScreen";
 import { MapPanel } from "./components/MapPanel";
 import { MemberManager } from "./components/MemberManager";
@@ -38,6 +47,7 @@ import {
   loadAlbumInviteSettings,
   loadAlbums,
   loadInviteCodePreview,
+  loadGlobalPhotos,
   loadMyDirectAlbumInvitations,
   loadPhotos,
   requestAlbumMembership,
@@ -47,6 +57,7 @@ import {
   uploadProfileAvatar,
   uploadPhoto,
 } from "./lib/data";
+import { readPhotoMetadata } from "./lib/image";
 import {
   canDeletePhoto,
   canEditPhoto,
@@ -69,6 +80,7 @@ import type {
   NearbyUser,
   PhotoCategory,
   PhotoLocationGroup,
+  PhotoUploadFailure,
 } from "./types";
 
 type ViewMode = "map" | "photos";
@@ -196,23 +208,19 @@ export default function App() {
     }
   };
 
-  const socialLogin = async (provider: "google" | "apple") => {
+  const googleLogin = async () => {
     if (!supabase) return;
     setAuthBusy(true);
     setAuthMessage("");
     try {
       const { error } = await supabase.auth.signInWithOAuth({
-        provider,
+        provider: "google",
         options: { redirectTo: authReturnURL() },
       });
       if (error) throw error;
     } catch (error) {
-      console.error(`${provider} OAuth start failed:`, error);
-      setAuthMessage(
-        provider === "google"
-          ? "Googleログインを開始できませんでした"
-          : "Appleログインを開始できませんでした",
-      );
+      console.error("Google OAuth start failed:", error);
+      setAuthMessage("Googleログインを開始できませんでした");
     } finally {
       setAuthBusy(false);
     }
@@ -282,8 +290,7 @@ export default function App() {
         onEmailSignup={emailSignup}
         onPasswordResetRequest={requestPasswordReset}
         onPasswordUpdate={updatePassword}
-        onGoogleLogin={() => socialLogin("google")}
-        onAppleLogin={() => socialLogin("apple")}
+        onGoogleLogin={googleLogin}
       />
     );
   }
@@ -311,6 +318,10 @@ function Dashboard({
   const [albums, setAlbums] = useState<Album[]>([]);
   const [selectedAlbumID, setSelectedAlbumID] = useState("");
   const [photos, setPhotos] = useState<AlbumPhoto[]>([]);
+  const [globalPhotos, setGlobalPhotos] = useState<AlbumPhoto[]>([]);
+  const [globalMode, setGlobalMode] = useState(false);
+  const [globalLoading, setGlobalLoading] = useState(false);
+  const [globalHasMore, setGlobalHasMore] = useState(true);
   const [viewMode, setViewMode] = useState<ViewMode>("map");
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
@@ -327,6 +338,12 @@ function Dashboard({
   const [sharingAlbum, setSharingAlbum] = useState<Album>();
   const [showsMembers, setShowsMembers] = useState(false);
   const [showsSettings, setShowsSettings] = useState(false);
+  const [accountPage, setAccountPage] = useState<AccountPageRoute | null>(() =>
+    accountRouteFromPath(window.location.pathname),
+  );
+  const accountReturnPath = useRef("/");
+  const [showsLogoutConfirm, setShowsLogoutConfirm] = useState(false);
+  const [logoutBusy, setLogoutBusy] = useState(false);
   const [showsProfileEdit, setShowsProfileEdit] = useState(false);
   const [showsAvatarActions, setShowsAvatarActions] = useState(false);
   const [profileName, setProfileName] = useState(sessionUser.displayName);
@@ -352,6 +369,27 @@ function Dashboard({
     setUser(sessionUser);
     setProfileName(sessionUser.displayName);
   }, [sessionUser]);
+
+  useEffect(() => {
+    const updateAccountRoute = () => {
+      setAccountPage(accountRouteFromPath(window.location.pathname));
+    };
+    window.addEventListener("popstate", updateAccountRoute);
+    return () => window.removeEventListener("popstate", updateAccountRoute);
+  }, []);
+
+  const openAccountPage = (route: AccountPageRoute) => {
+    accountReturnPath.current = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    window.history.pushState({}, "", ACCOUNT_ROUTE_PATHS[route]);
+    setShowsSettings(false);
+    setAccountPage(route);
+  };
+
+  const closeAccountPage = () => {
+    window.history.replaceState({}, "", accountReturnPath.current);
+    setAccountPage(null);
+    setShowsSettings(true);
+  };
 
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumID);
   const canInviteNearby = Boolean(
@@ -415,6 +453,31 @@ function Dashboard({
     }
   }, [selectedAlbumID]);
 
+  const refreshGlobalPhotos = useCallback(async (append = false) => {
+    setGlobalLoading(true);
+    try {
+      const offset = append ? globalPhotos.length : 0;
+      const result = await loadGlobalPhotos(offset, 24);
+      setGlobalPhotos((current) =>
+        append ? [...current, ...result.photos] : result.photos,
+      );
+      setGlobalHasMore(result.hasMore);
+    } catch (error) {
+      setToast(
+        error instanceof Error
+          ? error.message
+          : "みんなの思い出を読み込めませんでした。",
+      );
+    } finally {
+      setGlobalLoading(false);
+    }
+  }, [globalPhotos.length]);
+
+  const openGlobalMemories = () => {
+    setGlobalMode(true);
+    if (globalPhotos.length === 0) void refreshGlobalPhotos();
+  };
+
   useEffect(() => {
     void refreshAlbums();
   }, [refreshAlbums]);
@@ -474,7 +537,7 @@ function Dashboard({
   }, [refreshAlbums, refreshPhotos]);
 
   useEffect(() => {
-    if (!supabase || !selectedAlbumID) return;
+    if (!supabase || !selectedAlbumID || globalMode) return;
     const client = supabase;
     const channel = client
       .channel(`photos:${selectedAlbumID}`)
@@ -492,7 +555,7 @@ function Dashboard({
     return () => {
       void client.removeChannel(channel);
     };
-  }, [refreshPhotos, selectedAlbumID]);
+  }, [globalMode, refreshPhotos, selectedAlbumID]);
 
   useEffect(() => {
     if (!supabase) return;
@@ -534,9 +597,13 @@ function Dashboard({
 
   const canPost = canPostPhoto(selectedAlbum?.role);
   const canEdit = (photo: AlbumPhoto) =>
-    canEditPhoto(selectedAlbum?.role, user.id, photo.author_id);
+    globalMode
+      ? photo.author_id === user.id
+      : canEditPhoto(selectedAlbum?.role, user.id, photo.author_id);
   const canDelete = (photo: AlbumPhoto) =>
-    canDeletePhoto(selectedAlbum?.role, user.id, photo.author_id);
+    globalMode
+      ? photo.author_id === user.id
+      : canDeletePhoto(selectedAlbum?.role, user.id, photo.author_id);
 
   const openPhoto = (photo: AlbumPhoto) => {
     setDetailPhotos([photo]);
@@ -549,50 +616,95 @@ function Dashboard({
   };
 
   const savePhoto = async (values: {
-    file?: File;
+    files?: File[];
+    title: string;
     caption: string;
     category: PhotoCategory;
     capturedAt: string;
     latitude: number;
     longitude: number;
-  }) => {
+    visibility: "album_only" | "global";
+  }, onProgress: (completed: number, total: number) => void) => {
     if (!selectedAlbum) throw new Error("アルバムが選択されていません。");
 
     if (editingPhoto) {
       await updatePhoto(editingPhoto.id, {
+        title: values.title,
         caption: values.caption,
         category: values.category,
         captured_at: values.capturedAt,
         latitude: values.latitude,
         longitude: values.longitude,
+        visibility: values.visibility,
       });
       await refreshPhotos();
+      if (globalMode || editingPhoto.visibility === "global" || values.visibility === "global") {
+        await refreshGlobalPhotos();
+      }
       setToast("写真を更新しました");
       setEditingPhoto(undefined);
-      return;
+      return [];
     }
 
-    if (!values.file) throw new Error("写真を選択してください。");
-    await uploadPhoto({
-      albumID: selectedAlbum.id,
-      authorID: user.id,
-      authorName: user.displayName,
-      file: values.file,
-      caption: values.caption,
-      category: values.category,
-      capturedAt: values.capturedAt,
-      latitude: values.latitude,
-      longitude: values.longitude,
+    const files = values.files ?? [];
+    if (files.length === 0) throw new Error("写真を選択してください。");
+    console.info("[PhotoUpload] 画像枚数", files.length);
+    const failures: PhotoUploadFailure[] = [];
+    let succeeded = 0;
+    for (const [index, file] of files.entries()) {
+      console.info("[PhotoUpload] 画像名", file.name);
+      try {
+        const metadata = await readPhotoMetadata(file);
+        await uploadPhoto({
+          albumID: selectedAlbum.id,
+          authorID: user.id,
+          authorName: user.displayName,
+          file,
+          title: values.title,
+          caption: values.caption,
+          category: values.category,
+          capturedAt: metadata.capturedAt?.toISOString() ?? values.capturedAt,
+          latitude: metadata.latitude ?? values.latitude,
+          longitude: metadata.longitude ?? values.longitude,
+          visibility: values.visibility,
+        });
+        succeeded += 1;
+      } catch (error) {
+        const reason = !navigator.onLine
+          ? "Network Error: インターネット接続を確認してください"
+          : error instanceof Error
+            ? error.message
+            : "Unknown Error: 不明なエラー";
+        console.error("[PhotoUpload] 画像アップロード失敗", {
+          fileName: file.name,
+          reason,
+          error,
+        });
+        failures.push({ file, reason });
+      }
+      onProgress(index + 1, files.length);
+    }
+    console.info("[PhotoUpload] 完了件数", {
+      total: files.length,
+      succeeded,
+      failed: failures.length,
     });
     await refreshPhotos();
     await refreshAlbums();
-    setToast("写真をアルバムに追加しました");
+    if (values.visibility === "global" && globalMode) await refreshGlobalPhotos();
+    setToast(
+      failures.length === 0
+        ? `${files.length}枚中 ${succeeded}枚保存成功`
+        : `${files.length}枚中 ${succeeded}枚保存成功・${failures.length}枚失敗`,
+    );
+    return failures;
   };
 
   const removePhoto = async (photo: AlbumPhoto) => {
     const result = await deletePhoto(photo);
     await refreshPhotos();
     await refreshAlbums();
+    if (photo.visibility === "global") await refreshGlobalPhotos();
     setDetailPhotos((current) => current.filter((candidate) => candidate.id !== photo.id));
     setToast(
       result.storageRemoved
@@ -873,7 +985,45 @@ function Dashboard({
       )}
 
       <main className="app-main">
-        {selectedAlbum ? (
+        {globalMode ? (
+          <>
+            <section className="album-hero global-memories-hero">
+              <div>
+                <span className="eyebrow">ログインユーザー限定</span>
+                <h1>みんなの思い出</h1>
+                <p>旅先の景色や大切な瞬間を、みんなで楽しむ場所です。</p>
+              </div>
+              <div className="album-stats">
+                <span>
+                  <strong>{globalPhotos.length}</strong>
+                  写真
+                </span>
+              </div>
+            </section>
+            <section className="content-stage global-memories-stage">
+              {globalLoading && globalPhotos.length === 0 ? (
+                <div className="loading-state">
+                  <span />
+                  <p>みんなの思い出を読み込んでいます…</p>
+                </div>
+              ) : (
+                <>
+                  <PhotoGrid photos={globalPhotos} onSelect={openPhoto} />
+                  {globalHasMore ? (
+                    <button
+                      className="secondary-button load-more-button"
+                      type="button"
+                      disabled={globalLoading}
+                      onClick={() => void refreshGlobalPhotos(true)}
+                    >
+                      {globalLoading ? "読み込み中…" : "さらに表示"}
+                    </button>
+                  ) : null}
+                </>
+              )}
+            </section>
+          </>
+        ) : selectedAlbum ? (
           <>
             <section className="album-hero">
               <div>
@@ -959,19 +1109,22 @@ function Dashboard({
       <nav className="bottom-nav" aria-label="メインメニュー">
         <button
           type="button"
-          className={viewMode === "map" ? "is-active" : ""}
-          onClick={() => setViewMode("map")}
+          className={!globalMode && viewMode === "map" ? "is-active" : ""}
+          onClick={() => {
+            setGlobalMode(false);
+            setViewMode("map");
+          }}
         >
           <MapIcon />
           <span>地図</span>
         </button>
         <button
           type="button"
-          className={viewMode === "photos" ? "is-active" : ""}
-          onClick={() => setViewMode("photos")}
+          className={globalMode ? "is-active" : ""}
+          onClick={openGlobalMemories}
         >
-          <Grid2X2 />
-          <span>写真</span>
+          <Globe2 />
+          <span>みんな</span>
         </button>
         <button
           type="button"
@@ -1001,7 +1154,10 @@ function Dashboard({
           currentUserID={user.id}
           selectedAlbumID={selectedAlbumID}
           onClose={() => setShowsAlbumManager(false)}
-          onSelect={setSelectedAlbumID}
+          onSelect={(albumID) => {
+            setGlobalMode(false);
+            setSelectedAlbumID(albumID);
+          }}
           onCreate={addAlbum}
           onJoin={enterAlbum}
           onDelete={removeAlbum}
@@ -1206,6 +1362,7 @@ function Dashboard({
                 void openShare();
               }}
             />
+            <AccountInfoMenu onNavigate={openAccountPage} />
             <div className="install-note">
               <CircleUserRound size={20} />
               <p>
@@ -1217,13 +1374,75 @@ function Dashboard({
               className="danger-button danger-button--wide"
               type="button"
               onClick={() => {
-                void nearby.stopPresence().finally(onSignOut);
+                setShowsSettings(false);
+                setShowsLogoutConfirm(true);
               }}
             >
               <LogOut size={18} />
               ログアウト
             </button>
           </div>
+        </Modal>
+      ) : null}
+
+      {accountPage ? (
+        <Modal
+          title={accountPageTitle(accountPage)}
+          size="wide"
+          onClose={closeAccountPage}
+        >
+          <AccountInfoPage route={accountPage} />
+        </Modal>
+      ) : null}
+
+      {showsLogoutConfirm ? (
+        <Modal
+          title="ログアウト"
+          onClose={() => {
+            if (!logoutBusy) {
+              setShowsLogoutConfirm(false);
+              setShowsSettings(true);
+            }
+          }}
+          footer={
+            <div className="logout-confirm-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={logoutBusy}
+                onClick={() => {
+                  setShowsLogoutConfirm(false);
+                  setShowsSettings(true);
+                }}
+              >
+                キャンセル
+              </button>
+              <button
+                className="danger-button"
+                type="button"
+                disabled={logoutBusy}
+                onClick={() => {
+                  setLogoutBusy(true);
+                  void (async () => {
+                    try {
+                      await nearby.stopPresence().catch(() => undefined);
+                      await onSignOut();
+                    } catch (error) {
+                      console.error("Sign out failed:", error);
+                      setToast("ログアウトできませんでした。通信状態を確認してください");
+                      setLogoutBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {logoutBusy ? "ログアウト中…" : "ログアウト"}
+              </button>
+            </div>
+          }
+        >
+          <p className="logout-confirm-message">
+            現在のアカウントからログアウトします。よろしいですか？
+          </p>
         </Modal>
       ) : null}
 

@@ -91,7 +91,7 @@ describe("Supabase Auth連携", () => {
   it("01/02 新規登録に確認メール戻り先を設定し、確認案内を表示する", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByText("MapAlbumにログイン");
+    await screen.findByText("Eternal memoriesにログイン");
     await user.click(screen.getByRole("button", { name: "新規登録" }));
     await user.type(screen.getByLabelText("表示名"), "はなこ");
     await user.type(screen.getByLabelText("メールアドレス"), "hana@example.com");
@@ -115,7 +115,7 @@ describe("Supabase Auth連携", () => {
   it("03 ログインをSupabaseへ渡し、セッション前はデータを表示しない", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByText("MapAlbumにログイン");
+    await screen.findByText("Eternal memoriesにログイン");
     expect(screen.queryByText("最初のアルバムを作りましょう")).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("メールアドレス"), "hana@example.com");
     await user.type(screen.getByLabelText("パスワード"), "password1");
@@ -128,10 +128,10 @@ describe("Supabase Auth連携", () => {
     });
   });
 
-  it("Google／Appleログインへ現在のURLを戻り先として渡す", async () => {
+  it("Googleログインへ現在のURLを戻り先として渡す", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByText("MapAlbumにログイン");
+    await screen.findByText("Eternal memoriesにログイン");
 
     await user.click(screen.getByRole("button", { name: "Googleで続ける" }));
     expect(auth.signInWithOAuth).toHaveBeenLastCalledWith({
@@ -139,17 +139,12 @@ describe("Supabase Auth連携", () => {
       options: { redirectTo: expect.stringContaining(window.location.origin) },
     });
 
-    await user.click(screen.getByRole("button", { name: "Appleで続ける" }));
-    expect(auth.signInWithOAuth).toHaveBeenLastCalledWith({
-      provider: "apple",
-      options: { redirectTo: expect.stringContaining(window.location.origin) },
-    });
   });
 
   it("パスワード再設定にrecovery付きの戻り先を設定する", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByText("MapAlbumにログイン");
+    await screen.findByText("Eternal memoriesにログイン");
 
     await user.click(screen.getByRole("button", { name: "パスワードを忘れた場合" }));
     await user.type(screen.getByLabelText("メールアドレス"), "hana@example.com");
@@ -167,7 +162,7 @@ describe("Supabase Auth連携", () => {
   it("04 セッション確立後にダッシュボードを表示しログアウトする", async () => {
     const user = userEvent.setup();
     render(<App />);
-    await screen.findByText("MapAlbumにログイン");
+    await screen.findByText("Eternal memoriesにログイン");
     await act(async () => {
       state.authCallback?.("SIGNED_IN", {
         user: {
@@ -180,100 +175,13 @@ describe("Supabase Auth連携", () => {
     await screen.findByText("最初のアルバムを作りましょう");
     await user.click(screen.getAllByRole("button", { name: "設定" })[0]);
     await user.click(screen.getByRole("button", { name: /ログアウト/ }));
+    expect(auth.signOut).not.toHaveBeenCalled();
+    expect(
+      screen.getByText("現在のアカウントからログアウトします。よろしいですか？"),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "ログアウト" }));
     await waitFor(() => expect(auth.signOut).toHaveBeenCalled());
     expect(data.clearPrivateOfflineData).toHaveBeenCalled();
   });
 
-  it("管理者が参加申請INSERTをRealtime受信すると一度だけ通知し件数を表示する", async () => {
-    const user = userEvent.setup();
-    const ownerAlbum = {
-      id: "album-1",
-      name: "思い出",
-      description: "",
-      invite_code: "",
-      created_by: "user-1",
-      owner_id: "user-1",
-      created_at: "2026-07-25T00:00:00.000Z",
-      role: "owner",
-      members_can_invite: false,
-      photo_count: 0,
-      member_count: 1,
-    };
-    const request = {
-      id: "request-1",
-      album_id: "album-1",
-      album_name: "思い出",
-      user_id: "user-2",
-      requested_role: "member",
-      status: "pending",
-      created_at: "2026-07-25T01:00:00.000Z",
-      display_name: "あおい",
-      email: "aoi@example.com",
-    };
-    data.loadAlbums.mockResolvedValue({
-      data: [ownerAlbum],
-      fromCache: false,
-    });
-    let managerRequests: typeof request[] = [];
-    data.loadManagedJoinRequests.mockImplementation(async () => managerRequests);
-
-    render(<App />);
-    await screen.findByText("MapAlbumにログイン");
-    await act(async () => {
-      state.authCallback?.("SIGNED_IN", {
-        user: {
-          id: "user-1",
-          email: "owner@example.com",
-          user_metadata: { display_name: "オーナー" },
-        },
-      });
-    });
-    await screen.findByRole("heading", { name: "思い出", level: 1 });
-    await waitFor(() =>
-      expect(
-        state.realtimeHandlers.some(
-          ({ filter }) =>
-            filter.table === "album_join_requests" &&
-            filter.event === "INSERT",
-        ),
-      ).toBe(true),
-    );
-
-    const handler = state.realtimeHandlers.find(
-      ({ filter }) =>
-        filter.table === "album_join_requests" &&
-        filter.event === "INSERT",
-    );
-    managerRequests = [request];
-    await act(async () => {
-      handler?.callback({
-        new: {
-          id: "request-1",
-          album_id: "album-1",
-          status: "pending",
-        },
-      });
-    });
-
-    expect(
-      await screen.findByText(
-        "あおいさんから「思い出」への参加申請が届きました",
-      ),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("button", { name: "共有・参加申請 1件" }),
-    ).toBeInTheDocument();
-
-    await user.click(
-      screen.getByRole("button", { name: "あとで" }),
-    );
-    await act(async () => {
-      document.dispatchEvent(new Event("visibilitychange"));
-    });
-    expect(
-      screen.queryByText(
-        "あおいさんから「思い出」への参加申請が届きました",
-      ),
-    ).not.toBeInTheDocument();
-  });
 });

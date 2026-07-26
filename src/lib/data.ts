@@ -228,12 +228,14 @@ export async function loadPhotos(
       author_avatar_url: avatarByAuthor.get(photo.author_id) ?? null,
       storage_path: photo.storage_path,
       image_url: signedURLByPath.get(photo.storage_path) ?? "",
+      title: photo.title ?? "",
       caption: photo.caption ?? "",
       category: photo.category as PhotoCategory,
       captured_at: photo.captured_at,
       created_at: photo.created_at,
       latitude: Number(photo.latitude),
       longitude: Number(photo.longitude),
+      visibility: photo.visibility === "global" ? "global" : "album_only",
     }));
 
     await set(photoCacheKey(albumID), photos);
@@ -243,6 +245,61 @@ export async function loadPhotos(
     if (cached) return { data: cached, fromCache: true };
     throw error;
   }
+}
+
+export async function loadGlobalPhotos(offset = 0, limit = 24) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("photos")
+    .select(
+      "id, album_id, author_id, author_name, storage_path, title, caption, category, captured_at, created_at, latitude, longitude, visibility",
+    )
+    .eq("visibility", "global")
+    .order("created_at", { ascending: false })
+    .range(offset, offset + limit - 1);
+  if (error) throw error;
+
+  const rows = data ?? [];
+  const authorIDs = [...new Set(rows.map((photo) => photo.author_id))];
+  const { data: authorProfiles } =
+    authorIDs.length > 0
+      ? await client.from("profiles").select("id, avatar_url").in("id", authorIDs)
+      : { data: [] };
+  const avatarByAuthor = new Map(
+    (authorProfiles ?? []).map((profile) => [profile.id, profile.avatar_url]),
+  );
+  const paths = rows.map((photo) => photo.storage_path).filter(Boolean);
+  const signedURLByPath = new Map<string, string>();
+  if (paths.length > 0) {
+    const { data: signedData, error: signedError } = await client.storage
+      .from("album-photos")
+      .createSignedUrls(paths, 60 * 60);
+    if (signedError) throw signedError;
+    for (const signed of signedData ?? []) {
+      if (signed.path && signed.signedUrl) {
+        signedURLByPath.set(signed.path, signed.signedUrl);
+      }
+    }
+  }
+
+  const photos: AlbumPhoto[] = rows.map((photo) => ({
+    id: photo.id,
+    album_id: photo.album_id,
+    author_id: photo.author_id,
+    author_name: photo.author_name,
+    author_avatar_url: avatarByAuthor.get(photo.author_id) ?? null,
+    storage_path: photo.storage_path,
+    image_url: signedURLByPath.get(photo.storage_path) ?? "",
+    title: photo.title ?? "",
+    caption: photo.caption ?? "",
+    category: photo.category as PhotoCategory,
+    captured_at: photo.captured_at,
+    created_at: photo.created_at,
+    latitude: Number(photo.latitude),
+    longitude: Number(photo.longitude),
+    visibility: "global",
+  }));
+  return { photos, hasMore: rows.length === limit };
 }
 
 export async function createAlbum(name: string, description: string) {
@@ -632,55 +689,136 @@ export async function uploadPhoto(input: {
   authorID: string;
   authorName: string;
   file: File;
+  title: string;
   caption: string;
   category: PhotoCategory;
   capturedAt: string;
   latitude: number;
   longitude: number;
+  visibility: "album_only" | "global";
 }) {
   const client = requireSupabase();
   const photoID = crypto.randomUUID();
   const storagePath = `${input.albumID}/${input.authorID}/${photoID}.jpg`;
-  const compressed = await compressPhoto(input.file);
+  console.info("[PhotoUpload] Storage開始", {
+    fileName: input.file.name,
+    storagePath,
+  });
+  let uploadBody: Blob;
+  let contentType = "image/jpeg";
+  try {
+    uploadBody = await compressPhoto(input.file);
+  } catch (compressionError) {
+    console.warn("[PhotoUpload] 画像変換失敗・原本を使用", {
+      fileName: input.file.name,
+      error: compressionError,
+    });
+    const originalType = input.file.type.toLowerCase();
+    const allowedTypes = new Set([
+      "image/jpeg",
+      "image/png",
+      "image/webp",
+      "image/heic",
+      "image/heif",
+    ]);
+    if (!allowedTypes.has(originalType)) {
+      throw new Error(
+        `Image Conversion Failed: ${input.file.name}（対応していない画像形式です）`,
+        { cause: compressionError },
+      );
+    }
+    if (input.file.size > 15 * 1024 * 1024) {
+      throw new Error(
+        `Storage Upload Failed: ${input.file.name}（15MBの上限を超えています）`,
+        { cause: compressionError },
+      );
+    }
+    uploadBody = input.file;
+    contentType = originalType;
+  }
 
   const { error: uploadError } = await client.storage
     .from("album-photos")
-    .upload(storagePath, compressed, {
-      contentType: "image/jpeg",
+    .upload(storagePath, uploadBody, {
+      contentType,
       cacheControl: "3600",
       upsert: false,
     });
-  if (uploadError) throw uploadError;
+  if (uploadError) {
+    console.error("[PhotoUpload] Storage失敗理由", {
+      fileName: input.file.name,
+      error: uploadError,
+    });
+    throw new Error(`Storage Upload Failed: ${uploadError.message}`);
+  }
+  console.info("[PhotoUpload] Storage成功", {
+    fileName: input.file.name,
+    storagePath,
+  });
 
+  console.info("[PhotoUpload] DB登録開始", {
+    fileName: input.file.name,
+    photoID,
+  });
   const { error: insertError } = await client.from("photos").insert({
     id: photoID,
     album_id: input.albumID,
     author_id: input.authorID,
     author_name: input.authorName,
     storage_path: storagePath,
+    title: input.title,
     caption: input.caption,
     category: input.category,
     captured_at: input.capturedAt,
     latitude: input.latitude,
     longitude: input.longitude,
+    visibility: input.visibility,
   });
 
   if (insertError) {
-    await client.storage.from("album-photos").remove([storagePath]);
-    throw insertError;
+    console.error("[PhotoUpload] DB登録失敗理由", {
+      fileName: input.file.name,
+      error: insertError,
+    });
+    const { error: rollbackError } = await client.storage
+      .from("album-photos")
+      .remove([storagePath]);
+    if (rollbackError) {
+      console.error("[PhotoUpload] Storageロールバック失敗", {
+        fileName: input.file.name,
+        storagePath,
+        error: rollbackError,
+      });
+    }
+    const permissionDenied =
+      supabaseErrorCode(insertError) === "42501" ||
+      /permission denied|row-level security/i.test(
+        supabaseErrorMessage(insertError),
+      );
+    throw new Error(
+      permissionDenied
+        ? "写真を保存できませんでした。ログイン状態またはアルバムの参加権限を確認してください。"
+        : "写真を保存できませんでした。時間をおいてもう一度お試しください。",
+    );
   }
+  console.info("[PhotoUpload] DB登録成功", {
+    fileName: input.file.name,
+    photoID,
+  });
 
-  return photoID;
+  return { photoID, storagePath };
 }
 
 export async function updatePhoto(
   photoID: string,
   updates: {
     caption: string;
+    title: string;
     category: PhotoCategory;
     captured_at: string;
     latitude: number;
     longitude: number;
+    visibility: "album_only" | "global";
   },
 ) {
   const client = requireSupabase();

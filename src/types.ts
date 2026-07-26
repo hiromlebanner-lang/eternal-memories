@@ -107,12 +107,19 @@ export interface AlbumPhoto {
   author_avatar_url?: string | null;
   storage_path: string;
   image_url: string;
+  title?: string;
   caption: string;
   category: PhotoCategory;
   captured_at: string;
   created_at: string;
   latitude: number;
   longitude: number;
+  visibility?: "album_only" | "global";
+}
+
+export interface PhotoUploadFailure {
+  file: File;
+  reason: string;
 }
 
 export interface PhotoDraft {

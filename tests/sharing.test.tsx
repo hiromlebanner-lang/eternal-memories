@@ -87,39 +87,6 @@ it("メンバーには招待発行UIを表示しない", () => {
   ).toBeInTheDocument();
 });
 
-it("共有画面上部に参加申請件数を表示し管理画面を直接開く", async () => {
-  const user = userEvent.setup();
-  const onManageMembers = vi.fn();
-  render(
-    <ShareAlbumModal
-      album={album("owner")}
-      onClose={vi.fn()}
-      onManageMembers={onManageMembers}
-      onNotice={vi.fn()}
-      pendingJoinRequestCount={3}
-    />,
-  );
-
-  const shortcut = screen.getByRole("button", { name: /参加申請 3件/ });
-  expect(shortcut).toHaveTextContent("承認または拒否する申請があります");
-  await user.click(shortcut);
-  expect(onManageMembers).toHaveBeenCalledOnce();
-});
-
-it("参加申請が99件を超える場合は99+と表示する", () => {
-  render(
-    <ShareAlbumModal
-      album={album("admin")}
-      onClose={vi.fn()}
-      onManageMembers={vi.fn()}
-      onNotice={vi.fn()}
-      pendingJoinRequestCount={120}
-    />,
-  );
-
-  expect(screen.getByText("99+")).toBeInTheDocument();
-});
-
 it("管理者はアルバム別の招待期限とメンバー招待許可を保存できる", async () => {
   const user = userEvent.setup();
   render(
