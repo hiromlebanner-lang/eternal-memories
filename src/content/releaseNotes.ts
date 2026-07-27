@@ -10,6 +10,17 @@ export interface ReleaseNote {
 // 新しい更新を先頭へ追加してください。画面ではこの配列をそのまま新しい順に表示します。
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "1.2.0",
+    releasedAt: "2026-07-27",
+    categories: ["新機能", "改善"],
+    changes: [
+      "アルバムの写真を保存できるようになりました",
+      "保存した写真にEternal memoriesの表記が入るようになりました",
+    ],
+    improvements: ["写真の閲覧権限と保存時の安全性を改善しました"],
+    fixes: [],
+  },
+  {
     version: "1.1.0",
     releasedAt: "2026-07-27",
     categories: ["新機能", "改善", "修正"],

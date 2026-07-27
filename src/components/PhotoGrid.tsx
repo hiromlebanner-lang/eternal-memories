@@ -5,9 +5,14 @@ import { CATEGORY_META } from "../types";
 interface PhotoGridProps {
   photos: AlbumPhoto[];
   onSelect: (photo: AlbumPhoto) => void;
+  protectImages?: boolean;
 }
 
-export function PhotoGrid({ photos, onSelect }: PhotoGridProps) {
+export function PhotoGrid({
+  photos,
+  onSelect,
+  protectImages = false,
+}: PhotoGridProps) {
   if (photos.length === 0) {
     return (
       <div className="empty-state">
@@ -31,10 +36,15 @@ export function PhotoGrid({ photos, onSelect }: PhotoGridProps) {
           >
             <div className="photo-card__image">
               <img
+                className={protectImages ? "protected-image" : undefined}
                 src={photo.image_url}
                 alt={photo.caption || `${meta.label}の写真`}
                 loading="lazy"
                 decoding="async"
+                draggable={!protectImages}
+                onContextMenu={
+                  protectImages ? (event) => event.preventDefault() : undefined
+                }
               />
               <span className="photo-card__category" style={{ background: meta.color }}>
                 {meta.emoji}

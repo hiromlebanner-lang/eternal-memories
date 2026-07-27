@@ -285,7 +285,7 @@ export async function loadGlobalPhotos(offset = 0, limit = 24) {
   if (paths.length > 0) {
     const { data: signedData, error: signedError } = await client.storage
       .from("album-photos")
-      .createSignedUrls(paths, 60 * 60);
+      .createSignedUrls(paths, 60 * 15);
     if (signedError) throw signedError;
     for (const signed of signedData ?? []) {
       if (signed.path && signed.signedUrl) {
@@ -312,6 +312,44 @@ export async function loadGlobalPhotos(offset = 0, limit = 24) {
     visibility: "global",
   }));
   return { photos, hasMore: rows.length === limit };
+}
+
+export async function downloadAlbumPhoto(photoID: string) {
+  const client = requireSupabase();
+  const {
+    data: { session },
+    error: sessionError,
+  } = await client.auth.getSession();
+  if (sessionError || !session?.access_token) {
+    throw sessionError ?? new Error("ログインが必要です");
+  }
+
+  const response = await fetch("/api/photo-download", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${session.access_token}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({ photoId: photoID }),
+  });
+  if (!response.ok) {
+    throw new Error(`Photo download failed: ${response.status}`);
+  }
+
+  const blob = await response.blob();
+  const disposition = response.headers.get("Content-Disposition") ?? "";
+  const fileName =
+    disposition.match(/filename="([^"]+)"/i)?.[1] ??
+    `eternal-memories_${new Date().toISOString().slice(0, 10).replaceAll("-", "")}.jpg`;
+  const objectURL = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = objectURL;
+  anchor.download = fileName;
+  anchor.rel = "noopener";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(objectURL), 1_000);
 }
 
 export async function createAlbum(name: string, description: string) {

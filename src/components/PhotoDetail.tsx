@@ -3,12 +3,13 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
+  Download,
   Edit3,
   MapPin,
   Trash2,
   UserRound,
 } from "lucide-react";
-import { useState } from "react";
+import { useRef, useState } from "react";
 import type { AlbumPhoto } from "../types";
 import { CATEGORY_META } from "../types";
 import { Modal } from "./Modal";
@@ -18,9 +19,12 @@ interface PhotoDetailProps {
   initialPhotoID?: string;
   canEdit: (photo: AlbumPhoto) => boolean;
   canDelete: (photo: AlbumPhoto) => boolean;
+  canDownload?: boolean;
+  protectImage?: boolean;
   onClose: () => void;
   onEdit: (photo: AlbumPhoto) => void;
   onDelete: (photo: AlbumPhoto) => Promise<void>;
+  onDownload?: (photoID: string) => Promise<void>;
 }
 
 export function PhotoDetail({
@@ -28,15 +32,21 @@ export function PhotoDetail({
   initialPhotoID,
   canEdit,
   canDelete,
+  canDownload = false,
+  protectImage = false,
   onClose,
   onEdit,
   onDelete,
+  onDownload,
 }: PhotoDetailProps) {
   const [index, setIndex] = useState(() => {
     const found = photos.findIndex((photo) => photo.id === initialPhotoID);
     return found >= 0 ? found : 0;
   });
   const [deleting, setDeleting] = useState(false);
+  const [downloading, setDownloading] = useState(false);
+  const [downloadMessage, setDownloadMessage] = useState("");
+  const downloadingRef = useRef(false);
 
   const resolvedIndex = Math.min(index, Math.max(0, photos.length - 1));
   const photo = photos[resolvedIndex];
@@ -54,6 +64,25 @@ export function PhotoDetail({
     }
   };
 
+  const download = async () => {
+    if (!onDownload || downloadingRef.current) return;
+    downloadingRef.current = true;
+    setDownloading(true);
+    setDownloadMessage("");
+    try {
+      await onDownload(photo.id);
+      setDownloadMessage("画像を保存しました");
+    } catch (error) {
+      console.error("[PhotoDownload] 画像の保存に失敗しました", error);
+      setDownloadMessage(
+        "画像を保存できませんでした。もう一度お試しください",
+      );
+    } finally {
+      downloadingRef.current = false;
+      setDownloading(false);
+    }
+  };
+
   return (
     <Modal
       title={photos.length > 1 ? `この場所の写真 ${photos.length}枚` : "写真の詳細"}
@@ -62,7 +91,15 @@ export function PhotoDetail({
     >
       <div className="photo-detail">
         <div className="photo-detail__visual">
-          <img src={photo.image_url} alt={photo.caption || "アルバムの写真"} />
+          <img
+            className={protectImage ? "protected-image" : undefined}
+            src={photo.image_url}
+            alt={photo.caption || "アルバムの写真"}
+            draggable={!protectImage}
+            onContextMenu={
+              protectImage ? (event) => event.preventDefault() : undefined
+            }
+          />
           {photos.length > 1 ? (
             <>
               <button
@@ -157,8 +194,19 @@ export function PhotoDetail({
             </div>
           </dl>
 
-          {canEdit(photo) || canDelete(photo) ? (
+          {canDownload || canEdit(photo) || canDelete(photo) ? (
             <div className="photo-detail__actions">
+              {canDownload && onDownload ? (
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={downloading}
+                  onClick={() => void download()}
+                >
+                  <Download size={17} />
+                  {downloading ? "保存中…" : "ダウンロード"}
+                </button>
+              ) : null}
               {canEdit(photo) ? (
                 <button
                   className="secondary-button"
@@ -181,6 +229,11 @@ export function PhotoDetail({
                 </button>
               ) : null}
             </div>
+          ) : null}
+          {downloadMessage ? (
+            <p className="photo-detail__download-message" role="status">
+              {downloadMessage}
+            </p>
           ) : null}
         </div>
       </div>

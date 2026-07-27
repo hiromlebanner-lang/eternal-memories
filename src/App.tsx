@@ -44,6 +44,7 @@ import {
   deleteAlbum,
   deleteProfileAvatar,
   deletePhoto,
+  downloadAlbumPhoto,
   loadAlbumInviteSettings,
   loadAlbums,
   loadInviteCodePreview,
@@ -1104,7 +1105,11 @@ function Dashboard({
                 </div>
               ) : (
                 <>
-                  <PhotoGrid photos={globalPhotos} onSelect={openPhoto} />
+                  <PhotoGrid
+                    photos={globalPhotos}
+                    onSelect={openPhoto}
+                    protectImages
+                  />
                   {globalHasMore ? (
                     <button
                       className="secondary-button load-more-button"
@@ -1295,6 +1300,8 @@ function Dashboard({
           initialPhotoID={detailPhotoID}
           canEdit={canEdit}
           canDelete={canDelete}
+          canDownload={!globalMode && Boolean(selectedAlbum)}
+          protectImage={globalMode}
           onClose={() => {
             setDetailPhotos([]);
             setDetailPhotoID(undefined);
@@ -1305,6 +1312,7 @@ function Dashboard({
             setShowsPhotoEditor(true);
           }}
           onDelete={removePhoto}
+          onDownload={downloadAlbumPhoto}
         />
       ) : null}
 

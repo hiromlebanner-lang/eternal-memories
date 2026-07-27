@@ -1727,6 +1727,12 @@ img {
   object-fit: contain;
 }
 
+.protected-image {
+  user-select: none;
+  -webkit-user-drag: none;
+  -webkit-touch-callout: none;
+}
+
 .photo-detail__nav {
   position: absolute;
   top: 50%;
@@ -1826,8 +1832,15 @@ img {
 
 .photo-detail__actions {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 9px;
+}
+
+.photo-detail__download-message {
+  margin: -4px 0 0;
+  color: var(--text-secondary);
+  font-size: 12px;
+  text-align: center;
 }
 
 /* Photo editor */
