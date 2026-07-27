@@ -129,14 +129,14 @@ describe("Supabase Auth連携", () => {
     render(<App />);
     await screen.findByText("Eternal memoriesにログイン");
     expect(screen.queryByText("最初のアルバムを作りましょう")).not.toBeInTheDocument();
-    await user.type(screen.getByLabelText("メールアドレス"), "hana@example.com");
-    await user.type(screen.getByLabelText("パスワード"), "password1");
+    await user.type(screen.getByLabelText("メールアドレス"), " Hana@Example.COM ");
+    await user.type(screen.getByLabelText("パスワード"), " Password1 ");
     await user.click(
       screen.getAllByRole("button", { name: /^ログイン/ }).at(-1)!,
     );
     expect(auth.signInWithPassword).toHaveBeenCalledWith({
       email: "hana@example.com",
-      password: "password1",
+      password: " Password1 ",
     });
   });
 
@@ -217,7 +217,7 @@ describe("Supabase Auth連携", () => {
     ).toBeInTheDocument();
   });
 
-  it("パスワード再設定をサーバーへ正規化して依頼する", async () => {
+  it("パスワード再設定をSupabaseへ正規化して依頼する", async () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Eternal memoriesにログイン");
@@ -226,14 +226,12 @@ describe("Supabase Auth連携", () => {
     await user.type(screen.getByLabelText("メールアドレス"), "Hana@Example.COM");
     await user.click(screen.getByRole("button", { name: /再設定メールを送信/ }));
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      "/api/password-reset",
-      expect.objectContaining({
-        method: "POST",
-        body: JSON.stringify({ email: "hana@example.com" }),
-      }),
+    expect(auth.resetPasswordForEmail).toHaveBeenCalledWith(
+      "hana@example.com",
+      {
+        redirectTo: "http://localhost:3000/reset-password",
+      },
     );
-    expect(auth.resetPasswordForEmail).not.toHaveBeenCalled();
     expect(await screen.findByRole("status")).toHaveTextContent(
       "迷惑メールフォルダ",
     );

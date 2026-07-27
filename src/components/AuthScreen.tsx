@@ -88,18 +88,7 @@ export function AuthScreen({
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
   const [error, setError] = useState("");
-  const [inputInteractionStarted, setInputInteractionStarted] = useState(false);
-  const inputInteractionStartedRef = useRef(false);
   const formRef = useRef<HTMLFormElement>(null);
-
-  const allowInput = () => {
-    inputInteractionStartedRef.current = true;
-    setInputInteractionStarted(true);
-  };
-
-  const preventRestoredFocus = (element: HTMLInputElement) => {
-    if (!inputInteractionStartedRef.current) element.blur();
-  };
 
   useLayoutEffect(() => {
     const activeElement = document.activeElement;
@@ -131,8 +120,6 @@ export function AuthScreen({
         await onEmailSignup(displayName, email, password);
       }
     } catch (caught) {
-      inputInteractionStartedRef.current = false;
-      setInputInteractionStarted(false);
       const activeElement = document.activeElement;
       if (
         activeElement instanceof HTMLElement &&
@@ -153,18 +140,7 @@ export function AuthScreen({
         : "Eternal memoriesにログイン";
 
   return (
-    <main
-      className="auth-screen"
-      onPointerDownCapture={(event) => {
-        if (event.target instanceof HTMLInputElement) allowInput();
-      }}
-      onTouchStartCapture={(event) => {
-        if (event.target instanceof HTMLInputElement) allowInput();
-      }}
-      onKeyDownCapture={(event) => {
-        if (event.key === "Tab") allowInput();
-      }}
-    >
+    <main className="auth-screen">
       <section className="auth-hero" aria-label="Eternal memoriesについて">
         <div className="brand-lockup">
           <span className="brand-mark">
@@ -248,8 +224,6 @@ export function AuthScreen({
                     onChange={(event) => setDisplayName(event.target.value)}
                     placeholder="例：はなこ"
                     autoComplete="name"
-                    readOnly={!inputInteractionStarted}
-                    onFocus={(event) => preventRestoredFocus(event.currentTarget)}
                     required
                   />
                 </div>
@@ -267,8 +241,6 @@ export function AuthScreen({
                     onChange={(event) => setEmail(event.target.value)}
                     placeholder="name@example.com"
                     autoComplete="email"
-                    readOnly={!inputInteractionStarted}
-                    onFocus={(event) => preventRestoredFocus(event.currentTarget)}
                     onInvalid={(event) => {
                       if (mode === "forgot") {
                         event.preventDefault();
@@ -297,8 +269,6 @@ export function AuthScreen({
                         ? "new-password"
                         : "current-password"
                     }
-                    readOnly={!inputInteractionStarted}
-                    onFocus={(event) => preventRestoredFocus(event.currentTarget)}
                     minLength={8}
                     required
                   />
@@ -317,8 +287,6 @@ export function AuthScreen({
                     onChange={(event) => setPasswordConfirmation(event.target.value)}
                     placeholder="もう一度入力"
                     autoComplete="new-password"
-                    readOnly={!inputInteractionStarted}
-                    onFocus={(event) => preventRestoredFocus(event.currentTarget)}
                     minLength={8}
                     required
                   />

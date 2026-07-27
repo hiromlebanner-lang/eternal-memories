@@ -17,23 +17,17 @@ function authProps(recoveryMode = false) {
 }
 
 describe("認証画面", () => {
-  it("初回表示では入力欄へフォーカスせず、タップ後に入力を許可する", async () => {
-    const user = userEvent.setup();
+  it("初回表示では入力欄へフォーカスせず、自動入力設定を維持する", () => {
     render(<AuthScreen {...authProps()} />);
     const email = screen.getByLabelText("メールアドレス");
     const password = screen.getByLabelText("パスワード");
 
     expect(document.activeElement).not.toBe(email);
     expect(document.activeElement).not.toBe(password);
-    expect(email).toHaveAttribute("readonly");
-    expect(password).toHaveAttribute("readonly");
+    expect(email).not.toHaveAttribute("readonly");
+    expect(password).not.toHaveAttribute("readonly");
     expect(email).toHaveAttribute("autocomplete", "email");
     expect(password).toHaveAttribute("autocomplete", "current-password");
-
-    await user.click(email);
-
-    expect(email).not.toHaveAttribute("readonly");
-    expect(email).toHaveFocus();
   });
 
   it("01 新規登録で表示名・メール・パスワードを渡す", async () => {

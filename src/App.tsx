@@ -231,7 +231,10 @@ export default function App() {
     setAuthBusy(true);
     setAuthMessage("");
     try {
-      const { error } = await supabase.auth.signInWithPassword({ email, password });
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim().toLowerCase(),
+        password,
+      });
       if (error) throw error;
     } finally {
       setAuthBusy(false);
@@ -294,22 +297,15 @@ export default function App() {
     setAuthBusy(true);
     setAuthMessage("");
     try {
-      const response = await fetch("/api/password-reset", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ email: normalizedEmail }),
-      });
-      const result = (await response
-        .json()
-        .catch(() => ({}))) as { message?: string };
-      if (!response.ok) {
-        throw new Error(
-          result.message ||
-            "メールを送信できませんでした。時間を空けてもう一度お試しください。",
-        );
-      }
+      const { error } = await supabase.auth.resetPasswordForEmail(
+        normalizedEmail,
+        {
+          redirectTo: authReturnURL("recovery"),
+        },
+      );
+      if (error) throw error;
       setAuthMessage(
-        `${result.message}\n迷惑メールフォルダと入力したメールアドレスをご確認ください。\n数分待っても届かない場合は、時間を空けて再送してください。`,
+        "入力内容を確認しました。登録済みのメールアドレスには、パスワード再設定メールを送信します。\n迷惑メールフォルダと入力したメールアドレスをご確認ください。\n数分待っても届かない場合は、時間を空けて再送してください。",
       );
     } finally {
       passwordResetInFlight.current = false;
