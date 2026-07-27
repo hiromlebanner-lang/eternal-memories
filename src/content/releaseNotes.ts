@@ -10,6 +10,14 @@ export interface ReleaseNote {
 // 新しい更新を先頭へ追加してください。画面ではこの配列をそのまま新しい順に表示します。
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "1.2.1",
+    releasedAt: "2026-07-27",
+    categories: ["改善", "修正"],
+    changes: [],
+    improvements: ["ログイン画面を開いた際の入力動作を改善しました"],
+    fixes: ["意図しないFace ID起動を防ぐようにしました"],
+  },
+  {
     version: "1.2.0",
     releasedAt: "2026-07-27",
     categories: ["新機能", "改善"],

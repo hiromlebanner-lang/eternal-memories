@@ -13,11 +13,29 @@ function authProps(recoveryMode = false) {
     onEmailSignup: vi.fn(async () => {}),
     onPasswordResetRequest: vi.fn(async () => {}),
     onPasswordUpdate: vi.fn(async () => {}),
-    onGoogleLogin: vi.fn(async () => {}),
   };
 }
 
 describe("認証画面", () => {
+  it("初回表示では入力欄へフォーカスせず、タップ後に入力を許可する", async () => {
+    const user = userEvent.setup();
+    render(<AuthScreen {...authProps()} />);
+    const email = screen.getByLabelText("メールアドレス");
+    const password = screen.getByLabelText("パスワード");
+
+    expect(document.activeElement).not.toBe(email);
+    expect(document.activeElement).not.toBe(password);
+    expect(email).toHaveAttribute("readonly");
+    expect(password).toHaveAttribute("readonly");
+    expect(email).toHaveAttribute("autocomplete", "email");
+    expect(password).toHaveAttribute("autocomplete", "current-password");
+
+    await user.click(email);
+
+    expect(email).not.toHaveAttribute("readonly");
+    expect(email).toHaveFocus();
+  });
+
   it("01 新規登録で表示名・メール・パスワードを渡す", async () => {
     const user = userEvent.setup();
     const props = authProps();
@@ -55,16 +73,6 @@ describe("認証画面", () => {
     );
   });
 
-  it("Googleログインを開始する", async () => {
-    const user = userEvent.setup();
-    const props = authProps();
-    render(<AuthScreen {...props} />);
-
-    await user.click(screen.getByRole("button", { name: "Googleで続ける" }));
-
-    expect(props.onGoogleLogin).toHaveBeenCalledOnce();
-  });
-
   it("05 パスワード再設定メールを要求する", async () => {
     const user = userEvent.setup();
     const props = authProps();
@@ -98,6 +106,5 @@ describe("認証画面", () => {
     expect(
       screen.getAllByRole("button", { name: /^ログイン/ }).at(-1),
     ).toBeDisabled();
-    expect(screen.getByRole("button", { name: "Googleで続ける" })).toBeDisabled();
   });
 });
