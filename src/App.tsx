@@ -84,6 +84,7 @@ import type {
 } from "./types";
 
 type ViewMode = "map" | "photos";
+type AlbumLoadStatus = "loading" | "success" | "error";
 
 function authReturnURL(mode?: "recovery") {
   const url = new URL(window.location.pathname, window.location.origin);
@@ -129,6 +130,7 @@ export default function App() {
   const [authBusy, setAuthBusy] = useState(false);
   const [authMessage, setAuthMessage] = useState("");
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
+  const [authRevision, setAuthRevision] = useState(0);
   const [passwordRecovery, setPasswordRecovery] = useState(
     () => new URLSearchParams(window.location.search).get("auth") === "recovery",
   );
@@ -136,6 +138,9 @@ export default function App() {
   useEffect(() => {
     if (!supabase) return;
     const client = supabase;
+    let active = true;
+    let authEventReceived = false;
+    let lastSessionSignature: string | null | undefined;
     const callbackURL = new URL(window.location.href);
     const oauthError = callbackURL.searchParams.get("error");
     const oauthDescription = callbackURL.searchParams.get("error_description");
@@ -153,19 +158,54 @@ export default function App() {
       callbackURL.searchParams.delete("error_description");
       window.history.replaceState({}, "", callbackURL);
     }
-    void client.auth
-      .getSession()
-      .then(({ data }) => setSession(data.session))
-      .finally(() => setAuthReady(true));
+    const applySession = (
+      nextSession: Session | null,
+      forceAlbumRefresh = false,
+    ) => {
+      if (!active) return;
+      const nextSignature = nextSession
+        ? `${nextSession.user.id}:${nextSession.access_token}`
+        : null;
+      const sessionChanged = nextSignature !== lastSessionSignature;
+      lastSessionSignature = nextSignature;
+      setSession(nextSession);
+      setAuthReady(true);
+      if (nextSession?.user && (forceAlbumRefresh || sessionChanged)) {
+        setAuthRevision((current) => current + 1);
+      }
+    };
+
     const { data: listener } = client.auth.onAuthStateChange(
       (event: AuthChangeEvent, nextSession) => {
-        setSession(nextSession);
-        setAuthReady(true);
+        authEventReceived = true;
+        applySession(nextSession, event === "SIGNED_IN");
         if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
         if (event === "SIGNED_OUT") void clearPrivateOfflineData();
       },
     );
-    return () => listener.subscription.unsubscribe();
+
+    void client.auth
+      .getSession()
+      .then(({ data, error }) => {
+        if (error) throw error;
+        if (!authEventReceived) applySession(data.session);
+      })
+      .catch((error) => {
+        console.error("Initial session check failed:", error);
+        if (active && !authEventReceived) {
+          setAuthMessage(
+            "ログイン状態を確認できませんでした。ページを再読み込みしてください。",
+          );
+        }
+      })
+      .finally(() => {
+        if (active) setAuthReady(true);
+      });
+
+    return () => {
+      active = false;
+      listener.subscription.unsubscribe();
+    };
   }, []);
 
   const emailLogin = async (email: string, password: string) => {
@@ -298,6 +338,7 @@ export default function App() {
   return (
     <Dashboard
       user={user}
+      authRevision={authRevision}
       onSignOut={async () => {
         await supabase?.auth.signOut();
         await clearPrivateOfflineData();
@@ -308,14 +349,19 @@ export default function App() {
 
 function Dashboard({
   user: sessionUser,
+  authRevision,
   onSignOut,
 }: {
   user: AppUser;
+  authRevision: number;
   onSignOut: () => Promise<void>;
 }) {
   const [user, setUser] = useState(sessionUser);
   const [dark, setDark] = useDarkMode();
   const [albums, setAlbums] = useState<Album[]>([]);
+  const [albumLoadStatus, setAlbumLoadStatus] =
+    useState<AlbumLoadStatus>("loading");
+  const [albumLoadError, setAlbumLoadError] = useState("");
   const [selectedAlbumID, setSelectedAlbumID] = useState("");
   const [photos, setPhotos] = useState<AlbumPhoto[]>([]);
   const [globalPhotos, setGlobalPhotos] = useState<AlbumPhoto[]>([]);
@@ -364,11 +410,26 @@ function Dashboard({
   const [busyNearbyInvitationID, setBusyNearbyInvitationID] =
     useState<string>();
   const inviteHandled = useRef(false);
+  const albumRequestID = useRef(0);
+  const albumLoadInFlight = useRef<{
+    userID: string;
+    promise: Promise<void>;
+  } | null>(null);
 
   useEffect(() => {
     setUser(sessionUser);
     setProfileName(sessionUser.displayName);
   }, [sessionUser]);
+
+  useEffect(() => {
+    albumRequestID.current += 1;
+    albumLoadInFlight.current = null;
+    setAlbums([]);
+    setSelectedAlbumID("");
+    setAlbumLoadStatus("loading");
+    setAlbumLoadError("");
+    setUsingCache(false);
+  }, [sessionUser.id]);
 
   useEffect(() => {
     const updateAccountRoute = () => {
@@ -404,20 +465,48 @@ function Dashboard({
     selectedAlbumID: selectedAlbum?.id,
     canInvite: canInviteNearby,
   });
-  const refreshAlbums = useCallback(async () => {
-    try {
-      const result = await loadAlbums(user.id);
-      setAlbums(result.data);
-      setUsingCache(result.fromCache);
-      setSelectedAlbumID((current) =>
-        result.data.some((album) => album.id === current)
-          ? current
-          : (result.data[0]?.id ?? ""),
-      );
-    } catch (error) {
-      setToast(error instanceof Error ? error.message : "アルバムを読み込めませんでした。");
-    }
-  }, [user.id]);
+  const refreshAlbums = useCallback(() => {
+    const userID = sessionUser.id;
+    if (!userID) return Promise.resolve();
+
+    const inFlight = albumLoadInFlight.current;
+    if (inFlight?.userID === userID) return inFlight.promise;
+
+    const requestID = ++albumRequestID.current;
+    setAlbumLoadStatus("loading");
+    setAlbumLoadError("");
+
+    const loadPromise = (async () => {
+      try {
+        const result = await loadAlbums(userID);
+        if (requestID !== albumRequestID.current) return;
+        setAlbums(result.data);
+        setUsingCache(result.fromCache);
+        setSelectedAlbumID((current) =>
+          result.data.some((album) => album.id === current)
+            ? current
+            : (result.data[0]?.id ?? ""),
+        );
+        setAlbumLoadStatus("success");
+      } catch (error) {
+        if (requestID !== albumRequestID.current) return;
+        console.error("Album loading failed:", { userID, error });
+        const message =
+          "アルバムを読み込めませんでした。通信状態を確認して再読み込みしてください。";
+        setAlbumLoadStatus("error");
+        setAlbumLoadError(message);
+        setToast(message);
+      }
+    })();
+
+    albumLoadInFlight.current = { userID, promise: loadPromise };
+    void loadPromise.finally(() => {
+      if (albumLoadInFlight.current?.promise === loadPromise) {
+        albumLoadInFlight.current = null;
+      }
+    });
+    return loadPromise;
+  }, [sessionUser.id]);
 
   const refreshDirectInvitations = useCallback(async (token?: string) => {
     try {
@@ -480,7 +569,7 @@ function Dashboard({
 
   useEffect(() => {
     void refreshAlbums();
-  }, [refreshAlbums]);
+  }, [authRevision, refreshAlbums]);
 
   useEffect(() => {
     void refreshDirectInvitations();
@@ -528,11 +617,18 @@ function Dashboard({
       void refreshPhotos();
     };
     const offlineNow = () => setOffline(true);
+    const visible = () => {
+      if (document.visibilityState === "visible" && navigator.onLine) {
+        void refreshAlbums();
+      }
+    };
     window.addEventListener("online", online);
     window.addEventListener("offline", offlineNow);
+    document.addEventListener("visibilitychange", visible);
     return () => {
       window.removeEventListener("online", online);
       window.removeEventListener("offline", offlineNow);
+      document.removeEventListener("visibilitychange", visible);
     };
   }, [refreshAlbums, refreshPhotos]);
 
@@ -1023,6 +1119,24 @@ function Dashboard({
               )}
             </section>
           </>
+        ) : albumLoadStatus === "loading" && albums.length === 0 ? (
+          <div className="loading-state">
+            <span />
+            <p>アルバムを読み込んでいます…</p>
+          </div>
+        ) : albumLoadStatus === "error" && albums.length === 0 ? (
+          <div className="welcome-empty">
+            <span>↻</span>
+            <h1>アルバムを読み込めませんでした</h1>
+            <p>{albumLoadError}</p>
+            <button
+              className="primary-button"
+              type="button"
+              onClick={() => void refreshAlbums()}
+            >
+              再読み込み
+            </button>
+          </div>
         ) : selectedAlbum ? (
           <>
             <section className="album-hero">

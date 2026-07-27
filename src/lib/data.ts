@@ -80,6 +80,9 @@ function isMissingRPCError(error: unknown, functionName: string) {
 }
 
 export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
+  if (!userID) {
+    throw new Error("ログインユーザーを確認してからアルバムを読み込んでください。");
+  }
   const client = requireSupabase();
 
   try {
@@ -106,8 +109,8 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
     const [
       { data: albumRows, error: albumError },
       { data: membershipRows, error: membershipError },
-      { data: photoRows },
-      { data: memberRows },
+      { data: photoRows, error: photoError },
+      { data: memberRows, error: memberError },
     ] = await Promise.all([
       loadAlbumRows(),
       client
@@ -120,6 +123,8 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
 
     if (albumError) throw albumError;
     if (membershipError) throw membershipError;
+    if (photoError) throw photoError;
+    if (memberError) throw memberError;
 
     const roleByAlbum = new Map(
       (membershipRows ?? []).map((membership) => [
@@ -137,45 +142,52 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
       memberCounts.set(row.album_id, (memberCounts.get(row.album_id) ?? 0) + 1);
     }
 
-    const albums = (albumRows ?? [])
-      .filter((album) => roleByAlbum.has(album.id))
-      .map(
-        (album): Album => {
-          const ownerID =
-            "owner_id" in album && typeof album.owner_id === "string"
-              ? album.owner_id
-              : album.created_by;
-          const membersCanInvite =
-            "members_can_invite" in album &&
-            Boolean(album.members_can_invite);
-          const role = roleByAlbum.get(album.id) ?? "viewer";
+    const seenAlbumIDs = new Set<string>();
+    const albums = (albumRows ?? []).reduce<Album[]>((result, album) => {
+      const ownerID =
+        "owner_id" in album && typeof album.owner_id === "string"
+          ? album.owner_id
+          : album.created_by;
+      const memberRole = roleByAlbum.get(album.id);
+      const role = ownerID === userID ? "owner" : memberRole;
 
-          return {
-            id: album.id,
-            name: album.name,
-            description: album.description ?? "",
-            invite_code: "",
-            created_by: album.created_by,
-            owner_id: ownerID,
-            created_at: album.created_at,
-            members_can_invite: membersCanInvite,
-            can_invite:
-              role === "owner" ||
-              role === "admin" ||
-              (role === "member" && membersCanInvite),
-            cover_url: null,
-            role,
-            photo_count: photoCounts.get(album.id) ?? 0,
-            member_count: memberCounts.get(album.id) ?? 1,
-          };
-        },
-      );
+      if (!role || seenAlbumIDs.has(album.id)) return result;
+      seenAlbumIDs.add(album.id);
+
+      const membersCanInvite =
+        "members_can_invite" in album && Boolean(album.members_can_invite);
+      result.push({
+        id: album.id,
+        name: album.name,
+        description: album.description ?? "",
+        invite_code: "",
+        created_by: album.created_by,
+        owner_id: ownerID,
+        created_at: album.created_at,
+        members_can_invite: membersCanInvite,
+        can_invite:
+          role === "owner" ||
+          role === "admin" ||
+          (role === "member" && membersCanInvite),
+        cover_url: null,
+        role,
+        photo_count: photoCounts.get(album.id) ?? 0,
+        member_count: memberCounts.get(album.id) ?? 1,
+      });
+      return result;
+    }, []);
 
     await set(albumCacheKey(userID), albums);
     return { data: albums, fromCache: false };
   } catch (error) {
     const cached = await get<Album[]>(albumCacheKey(userID));
-    if (cached) return { data: cached, fromCache: true };
+    if (cached && cached.length > 0) {
+      console.warn("Album loading failed; using cached albums:", {
+        userID,
+        error,
+      });
+      return { data: cached, fromCache: true };
+    }
     throw error;
   }
 }

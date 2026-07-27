@@ -128,17 +128,81 @@ describe("Supabase Auth連携", () => {
     });
   });
 
-  it("Googleログインへ現在のURLを戻り先として渡す", async () => {
-    const user = userEvent.setup();
-    render(<App />);
-    await screen.findByText("Eternal memoriesにログイン");
+  it("SIGNED_IN後に遅れて返った初回セッションでログイン状態を上書きしない", async () => {
+    let resolveSession:
+      | ((value: { data: { session: null }; error: null }) => void)
+      | undefined;
+    auth.getSession.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSession = resolve;
+      }),
+    );
+    data.loadAlbums.mockClear();
 
-    await user.click(screen.getByRole("button", { name: "Googleで続ける" }));
-    expect(auth.signInWithOAuth).toHaveBeenLastCalledWith({
-      provider: "google",
-      options: { redirectTo: expect.stringContaining(window.location.origin) },
+    render(<App />);
+    await waitFor(() => expect(state.authCallback).toBeTypeOf("function"));
+
+    await act(async () => {
+      state.authCallback?.("SIGNED_IN", {
+        access_token: "signed-in-token",
+        user: {
+          id: "user-1",
+          email: "hana@example.com",
+          user_metadata: { display_name: "はなこ" },
+        },
+      });
     });
 
+    await screen.findByText("最初のアルバムを作りましょう");
+    expect(data.loadAlbums).toHaveBeenCalledWith("user-1");
+
+    await act(async () => {
+      resolveSession?.({ data: { session: null }, error: null });
+    });
+
+    expect(
+      screen.queryByText("Eternal memoriesにログイン"),
+    ).not.toBeInTheDocument();
+    expect(data.loadAlbums).toHaveBeenCalledTimes(1);
+  });
+
+  it("アルバム取得中と取得成功0件を区別する", async () => {
+    let resolveAlbums:
+      | ((value: { data: []; fromCache: false }) => void)
+      | undefined;
+    data.loadAlbums.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveAlbums = resolve;
+      }),
+    );
+
+    render(<App />);
+    await waitFor(() => expect(state.authCallback).toBeTypeOf("function"));
+    await act(async () => {
+      state.authCallback?.("SIGNED_IN", {
+        access_token: "slow-login-token",
+        user: {
+          id: "user-1",
+          email: "hana@example.com",
+          user_metadata: { display_name: "はなこ" },
+        },
+      });
+    });
+
+    expect(
+      await screen.findByText("アルバムを読み込んでいます…"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText("最初のアルバムを作りましょう"),
+    ).not.toBeInTheDocument();
+
+    await act(async () => {
+      resolveAlbums?.({ data: [], fromCache: false });
+    });
+
+    expect(
+      await screen.findByText("最初のアルバムを作りましょう"),
+    ).toBeInTheDocument();
   });
 
   it("パスワード再設定にrecovery付きの戻り先を設定する", async () => {
