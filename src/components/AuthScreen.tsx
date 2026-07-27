@@ -10,6 +10,52 @@ import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
 
 type AuthMode = "login" | "signup" | "forgot";
 
+function localizedAuthError(caught: unknown) {
+  const error = caught as { code?: string; message?: string };
+  const detail = `${error.code ?? ""} ${error.message ?? ""}`.toLowerCase();
+
+  if (/[\u3040-\u30ff\u3400-\u9fff]/.test(error.message ?? "")) {
+    return error.message!;
+  }
+  if (detail.includes("invalid login credentials")) {
+    return "メールアドレスまたはパスワードが正しくありません。";
+  }
+  if (detail.includes("email not confirmed")) {
+    return "メールアドレスの認証が完了していません。";
+  }
+  if (
+    detail.includes("too many requests") ||
+    detail.includes("rate limit") ||
+    detail.includes("over_email_send_rate_limit")
+  ) {
+    return "時間を空けてもう一度お試しください。";
+  }
+  if (
+    detail.includes("network") ||
+    detail.includes("failed to fetch") ||
+    detail.includes("load failed")
+  ) {
+    return "通信に失敗しました。通信環境をご確認ください。";
+  }
+  if (detail.includes("user already registered")) {
+    return "このメールアドレスはすでに登録されています。";
+  }
+  if (detail.includes("password") && detail.includes("least")) {
+    return "パスワードは8文字以上で入力してください。";
+  }
+  if (detail.includes("signup") && detail.includes("disabled")) {
+    return "現在、新規登録を利用できません。";
+  }
+  if (
+    detail.includes("otp_expired") ||
+    detail.includes("token") ||
+    detail.includes("expired")
+  ) {
+    return "リンクの有効期限が切れているか、無効です。もう一度お試しください。";
+  }
+  return "認証処理に失敗しました。時間を空けてもう一度お試しください。";
+}
+
 interface AuthScreenProps {
   configured: boolean;
   busy: boolean;
@@ -94,7 +140,7 @@ export function AuthScreen({
       ) {
         activeElement.blur();
       }
-      setError(caught instanceof Error ? caught.message : "認証処理に失敗しました。");
+      setError(localizedAuthError(caught));
     }
   };
 
@@ -143,6 +189,11 @@ export function AuthScreen({
       </section>
 
       <section className="auth-panel">
+        <p className="auth-description">
+          Eternal memoriesは、撮影場所と一緒に大切な思い出を地図へ残し、
+          <br />
+          家族や友人と共有できる写真アルバムです。
+        </p>
         <div className="auth-card">
           <div className="auth-heading">
             <p>{recoveryMode ? "安全なパスワードへ更新" : "おかえりなさい"}</p>
@@ -331,9 +382,6 @@ export function AuthScreen({
             ) : null}
           </form>
         </div>
-        <p className="auth-footnote">
-          アルバムの内容は、ログイン済みかつ参加権限を持つメンバーだけが閲覧できます。
-        </p>
       </section>
     </main>
   );

@@ -73,6 +73,26 @@ describe("認証画面", () => {
     );
   });
 
+  it("ログインエラーを日本語で表示する", async () => {
+    const user = userEvent.setup();
+    const props = authProps();
+    props.onEmailLogin.mockRejectedValueOnce(
+      new Error("Invalid login credentials"),
+    );
+    render(<AuthScreen {...props} />);
+
+    await user.type(screen.getByLabelText("メールアドレス"), "hana@example.com");
+    await user.type(screen.getByLabelText("パスワード"), "incorrect");
+    await user.click(
+      screen.getAllByRole("button", { name: /^ログイン/ }).at(-1)!,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "メールアドレスまたはパスワードが正しくありません。",
+    );
+    expect(screen.queryByText("Invalid login credentials")).not.toBeInTheDocument();
+  });
+
   it("05 パスワード再設定メールを要求する", async () => {
     const user = userEvent.setup();
     const props = authProps();
