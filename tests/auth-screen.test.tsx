@@ -87,6 +87,23 @@ describe("認証画面", () => {
     expect(screen.queryByText("Invalid login credentials")).not.toBeInTheDocument();
   });
 
+  it("メール未確認エラーを日本語で表示する", async () => {
+    const user = userEvent.setup();
+    const props = authProps();
+    props.onEmailLogin.mockRejectedValueOnce(new Error("Email not confirmed"));
+    render(<AuthScreen {...props} />);
+
+    await user.type(screen.getByLabelText("メールアドレス"), "hana@example.com");
+    await user.type(screen.getByLabelText("パスワード"), "password1");
+    await user.click(
+      screen.getAllByRole("button", { name: /^ログイン/ }).at(-1)!,
+    );
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "メールアドレスの確認が完了していません。確認メールをご確認ください。",
+    );
+  });
+
   it("05 パスワード再設定メールを要求する", async () => {
     const user = userEvent.setup();
     const props = authProps();

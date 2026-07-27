@@ -87,15 +87,19 @@ import type {
 type ViewMode = "map" | "photos";
 type AlbumLoadStatus = "loading" | "success" | "error";
 
-function authReturnURL(mode?: "recovery") {
+function authReturnURL(mode?: "recovery" | "signup") {
   const url = new URL(
-    mode === "recovery" ? "/reset-password" : window.location.pathname,
+    mode === "recovery"
+      ? "/reset-password"
+      : mode === "signup"
+        ? "/auth/callback"
+        : window.location.pathname,
     window.location.origin,
   );
   const query = new URLSearchParams(window.location.search);
   const inviteCode = query.get("join");
   const inviteToken = query.get("invite");
-  if (mode !== "recovery") {
+  if (!mode) {
     if (inviteCode) url.searchParams.set("join", inviteCode);
     if (inviteToken) url.searchParams.set("invite", inviteToken);
   }
@@ -251,11 +255,11 @@ export default function App() {
     setAuthMessage("");
     try {
       const { data, error } = await supabase.auth.signUp({
-        email,
+        email: email.trim().toLowerCase(),
         password,
         options: {
           data: { display_name: displayName.trim() },
-          emailRedirectTo: authReturnURL(),
+          emailRedirectTo: authReturnURL("signup"),
         },
       });
       if (error) throw error;

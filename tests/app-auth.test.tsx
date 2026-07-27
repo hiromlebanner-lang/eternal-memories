@@ -106,7 +106,7 @@ describe("Supabase Auth連携", () => {
     await screen.findByText("Eternal memoriesにログイン");
     await user.click(screen.getByRole("button", { name: "新規登録" }));
     await user.type(screen.getByLabelText("表示名"), "はなこ");
-    await user.type(screen.getByLabelText("メールアドレス"), "hana@example.com");
+    await user.type(screen.getByLabelText("メールアドレス"), " Hana@Example.COM ");
     await user.type(screen.getByLabelText("パスワード"), "password1");
     await user.click(
       screen.getByRole("button", { name: /登録して確認メールを受け取る/ }),
@@ -117,7 +117,7 @@ describe("Supabase Auth連携", () => {
         email: "hana@example.com",
         options: expect.objectContaining({
           data: { display_name: "はなこ" },
-          emailRedirectTo: expect.stringContaining(window.location.origin),
+          emailRedirectTo: "http://localhost:3000/auth/callback",
         }),
       }),
     );

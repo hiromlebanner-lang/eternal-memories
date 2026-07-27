@@ -10,7 +10,7 @@ import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
 
 type AuthMode = "login" | "signup" | "forgot";
 
-function localizedAuthError(caught: unknown) {
+function localizedAuthError(caught: unknown, mode: AuthMode) {
   const error = caught as { code?: string; message?: string };
   const detail = `${error.code ?? ""} ${error.message ?? ""}`.toLowerCase();
 
@@ -21,7 +21,7 @@ function localizedAuthError(caught: unknown) {
     return "メールアドレスまたはパスワードが正しくありません。";
   }
   if (detail.includes("email not confirmed")) {
-    return "メールアドレスの認証が完了していません。";
+    return "メールアドレスの確認が完了していません。確認メールをご確認ください。";
   }
   if (
     detail.includes("too many requests") ||
@@ -53,7 +53,9 @@ function localizedAuthError(caught: unknown) {
   ) {
     return "リンクの有効期限が切れているか、無効です。もう一度お試しください。";
   }
-  return "認証処理に失敗しました。時間を空けてもう一度お試しください。";
+  return mode === "login"
+    ? "ログインできませんでした。時間を空けてもう一度お試しください。"
+    : "認証処理に失敗しました。時間を空けてもう一度お試しください。";
 }
 
 interface AuthScreenProps {
@@ -127,7 +129,7 @@ export function AuthScreen({
       ) {
         activeElement.blur();
       }
-      setError(localizedAuthError(caught));
+      setError(localizedAuthError(caught, mode));
     }
   };
 
