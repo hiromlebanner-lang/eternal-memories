@@ -202,7 +202,7 @@ export function ShareAlbumModal({
   };
 
   const share = async () => {
-    const text = `MapAlbum「${album.name}」への招待です。リンクを開いて参加するか選択してください。`;
+    const text = `Eternal memories「${album.name}」への招待です。リンクを開いて参加するか選択してください。`;
     setError("");
 
     if (typeof navigator.share === "function") {

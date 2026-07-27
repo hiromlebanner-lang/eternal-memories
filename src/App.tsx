@@ -270,7 +270,7 @@ export default function App() {
     return (
       <main className="preparing-app">
         <div className="preparing-logo">🗺️</div>
-        <h1>MapAlbum</h1>
+        <h1>Eternal memories</h1>
         <p>アルバムを読み込んでいます…</p>
         <div className="preparing-bar" aria-hidden="true" />
       </main>
@@ -919,7 +919,7 @@ function Dashboard({
             <MapIcon size={20} />
             <span>●</span>
           </span>
-          <span className="brand-title">MapAlbum</span>
+          <span className="brand-title">Eternal memories</span>
         </button>
 
         <button className="album-selector" type="button" onClick={() => setShowsAlbumManager(true)}>

@@ -27,7 +27,7 @@ function staticWorker(): Plugin {
       const headers = new Headers(response.headers);
       headers.delete("content-length");
       const imageURL = new URL("/og.png", request.url).href;
-      return new Response((await response.text()).replaceAll("__MAPALBUM_OG_IMAGE__", imageURL), {
+      return new Response((await response.text()).replaceAll("__ETERNAL_MEMORIES_OG_IMAGE__", imageURL), {
         status: response.status,
         statusText: response.statusText,
         headers,
@@ -79,9 +79,9 @@ export default defineConfig({
       registerType: "autoUpdate",
       includeAssets: ["icons/apple-touch-icon.png"],
       manifest: {
-        name: "MapAlbum — 地図写真アルバム",
-        short_name: "MapAlbum",
-        description: "みんなの写真を日本地図に残す共有アルバム",
+        name: "Eternal memories",
+        short_name: "Eternal memories",
+        description: "写真を地図上に記録し、大切な思い出を家族や友人と共有できる写真アルバムアプリです。",
         lang: "ja",
         start_url: "/",
         display: "standalone",

@@ -41,7 +41,7 @@ async function readyServiceWorker() {
           () =>
             reject(
               new Error(
-                "Service Workerの準備が完了しませんでした。通信状態を確認してMapAlbumを開き直してください。",
+                "Service Workerの準備が完了しませんでした。通信状態を確認してEternal memoriesを開き直してください。",
               ),
             ),
           SERVICE_WORKER_READY_TIMEOUT_MS,
@@ -136,7 +136,7 @@ export async function disableJoinRequestNotifications(options?: {
       const unsubscribed = await subscription.unsubscribe();
       if (!unsubscribed) {
         throw new Error(
-          "端末のPush購読を解除できませんでした。MapAlbumを開き直して、もう一度OFFにしてください。",
+          "端末のPush購読を解除できませんでした。Eternal memoriesを開き直して、もう一度OFFにしてください。",
         );
       }
     }
@@ -155,7 +155,7 @@ export async function setJoinRequestNotificationsEnabled(enabled: boolean) {
 
   if (isIOSDevice() && !isStandalonePWA()) {
     throw new Error(
-      "Safariの共有ボタンから「ホーム画面に追加」し、ホーム画面のMapAlbumから設定してください。",
+      "Safariの共有ボタンから「ホーム画面に追加」し、ホーム画面のEternal memoriesから設定してください。",
     );
   }
   if (!supportsJoinRequestNotifications()) {
@@ -191,7 +191,7 @@ export async function setJoinRequestNotificationsEnabled(enabled: boolean) {
     localStorage.removeItem(NOTIFICATION_KEY);
     if (permission === "denied" && isIOSDevice()) {
       throw new Error(
-        "通知が拒否されています。iPhoneの「設定」→「通知」→「MapAlbum」で「通知を許可」をONにしてから、もう一度お試しください。",
+        "通知が拒否されています。iPhoneの「設定」→「通知」→「Eternal memories」で「通知を許可」をONにしてから、もう一度お試しください。",
       );
     }
     throw new Error(

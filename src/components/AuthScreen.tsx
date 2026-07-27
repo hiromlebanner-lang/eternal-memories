@@ -112,6 +112,18 @@ export function AuthScreen({
       </section>
 
       <section className="auth-panel">
+        <article className="auth-purpose-card">
+          <h2>Eternal memoriesとは</h2>
+          <p>
+            Eternal memoriesは、写真を地図上に記録し、大切な思い出を家族や友人と共有できる写真アルバムアプリです。
+          </p>
+          <p>
+            旅行やお出かけの思い出を撮影場所とともに残し、写真を地図上から閲覧・管理できます。そしていつでも思い出に浸れます。
+          </p>
+          <p>
+            Googleアカウントまたはメールアドレスでログインしてご利用いただけます。
+          </p>
+        </article>
         <div className="auth-card">
           <div className="auth-heading">
             <p>{recoveryMode ? "安全なパスワードへ更新" : "おかえりなさい"}</p>

@@ -389,6 +389,36 @@ img {
   backdrop-filter: saturate(125%) blur(22px);
 }
 
+.auth-purpose-card {
+  width: min(100%, 440px);
+  margin: 0 auto 18px;
+  padding: 20px;
+  border: 1px solid rgb(230 124 158 / 20%);
+  border-radius: 22px;
+  color: #432f3b;
+  background: rgb(255 250 253 / 84%);
+  box-shadow: 0 14px 36px rgb(124 75 96 / 10%);
+  backdrop-filter: saturate(125%) blur(18px);
+}
+
+.auth-purpose-card h2 {
+  margin: 0 0 12px;
+  font-size: 19px;
+  line-height: 1.35;
+  letter-spacing: -0.025em;
+}
+
+.auth-purpose-card p {
+  margin: 0;
+  color: #735b68;
+  font-size: 13px;
+  line-height: 1.75;
+}
+
+.auth-purpose-card p + p {
+  margin-top: 9px;
+}
+
 @media (max-width: 699px) {
   .auth-mini-map {
     display: none;

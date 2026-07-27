@@ -4,26 +4,20 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#ff6b5f" />
-    <meta name="description" content="みんなの写真を日本地図に残す共有アルバム" />
+    <meta name="description" content="写真を地図上に記録し、大切な思い出を家族や友人と共有できる写真アルバムアプリです。" />
     <meta property="og:type" content="website" />
-    <meta property="og:title" content="MapAlbum" />
-    <meta property="og:description" content="みんなの思い出を、ひとつの地図へ。" />
-    <meta property="og:image" content="__MAPALBUM_OG_IMAGE__" />
-    <meta property="og:image:alt" content="日本地図に丸い写真が並ぶMapAlbumのイメージ" />
+    <meta property="og:title" content="Eternal memories" />
+    <meta property="og:description" content="写真を地図上に記録し、大切な思い出を家族や友人と共有できる写真アルバムアプリです。" />
     <meta name="twitter:card" content="summary_large_image" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="MapAlbum" />
+    <meta name="apple-mobile-web-app-title" content="Eternal memories" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
     <link rel="icon" href="/icons/icon-192.png" />
-    <title>MapAlbum — 地図写真アルバム</title>
+    <title>Eternal memories</title>
   </head>
   <body>
     <div id="root"></div>
-    <script>
-      const mapAlbumOGImage = document.querySelector('meta[property="og:image"]');
-      if (mapAlbumOGImage) mapAlbumOGImage.content = new URL("/og.png", location.origin).href;
-    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

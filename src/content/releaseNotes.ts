@@ -26,7 +26,7 @@ export const RELEASE_NOTES: ReleaseNote[] = [
     releasedAt: "2026-07-25",
     categories: ["新機能"],
     changes: [
-      "Eternal Memoriesを公開",
+      "Eternal memoriesを公開",
       "Googleログインとメールアドレスログインを追加",
       "共有アルバム作成、写真投稿、地図表示を追加",
     ],
