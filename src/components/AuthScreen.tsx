@@ -95,30 +95,16 @@ export function AuthScreen({
             <span>思い出は</span>
             <span className="auth-title-detail">写真をひらくたびに色づいていく。</span>
           </h1>
-          <p>
-            家族や友だちと、旅の景色や笑顔をひとつのアルバムに。
-            <br />
-            あの日の写真も、その時の想いも、いつまでも色あせない思い出として残せます。
-          </p>
         </div>
-        <div className="auth-mini-map" aria-hidden="true">
-          <span className="mini-route" />
-          <span className="mini-photo mini-photo--one">🌸</span>
-          <span className="mini-photo mini-photo--two">🍜</span>
-          <span className="mini-photo mini-photo--three">⛩️</span>
+        <div className="auth-hero-visual">
+          <img
+            src="/eternal-memories-map-pin.jpg"
+            alt="星空と風景を描いた地図ピンのイラスト"
+          />
         </div>
       </section>
 
       <section className="auth-panel">
-        <article className="auth-purpose-card">
-          <h2>Eternal memoriesとは</h2>
-          <p>
-            Eternal memoriesは、写真を地図上に記録し、大切な思い出を家族や友人と共有できる写真アルバムアプリです。
-          </p>
-          <p>
-            旅行やお出かけの思い出を撮影場所とともに残し、写真を地図上から閲覧・管理できます。そしていつでも思い出に浸れます。
-          </p>
-        </article>
         <div className="auth-card">
           <div className="auth-heading">
             <p>{recoveryMode ? "安全なパスワードへ更新" : "おかえりなさい"}</p>
