@@ -37,6 +37,7 @@ const data = vi.hoisted(() => ({
   updatePhoto: vi.fn(),
   uploadPhoto: vi.fn(),
 }));
+const fetchMock = vi.fn();
 
 vi.mock("../src/lib/supabase", () => ({
   isSupabaseConfigured: true,
@@ -81,6 +82,17 @@ beforeEach(() => {
   auth.signInWithOAuth.mockResolvedValue({ error: null });
   auth.resetPasswordForEmail.mockResolvedValue({ error: null });
   auth.signOut.mockResolvedValue({ error: null });
+  fetchMock.mockReset();
+  fetchMock.mockResolvedValue(
+    new Response(
+      JSON.stringify({
+        message:
+          "入力内容を確認しました。登録済みのメールアドレスには、パスワード再設定メールを送信します。",
+      }),
+      { status: 200, headers: { "Content-Type": "application/json" } },
+    ),
+  );
+  vi.stubGlobal("fetch", fetchMock);
   data.loadAlbums.mockResolvedValue({ data: [], fromCache: false });
   data.loadManagedJoinRequests.mockResolvedValue([]);
   data.loadMyPendingJoinRequests.mockResolvedValue([]);
@@ -205,22 +217,26 @@ describe("Supabase Auth連携", () => {
     ).toBeInTheDocument();
   });
 
-  it("パスワード再設定にrecovery付きの戻り先を設定する", async () => {
+  it("パスワード再設定をサーバーへ正規化して依頼する", async () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Eternal memoriesにログイン");
 
     await user.click(screen.getByRole("button", { name: "パスワードを忘れた場合" }));
-    await user.type(screen.getByLabelText("メールアドレス"), "hana@example.com");
+    await user.type(screen.getByLabelText("メールアドレス"), "Hana@Example.COM");
     await user.click(screen.getByRole("button", { name: /再設定メールを送信/ }));
 
-    expect(auth.resetPasswordForEmail).toHaveBeenCalledWith(
-      "hana@example.com",
-      {
-        redirectTo: expect.stringMatching(/[?&]auth=recovery(?:&|$)/),
-      },
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/password-reset",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ email: "hana@example.com" }),
+      }),
     );
-    expect(await screen.findByRole("status")).toHaveTextContent("再設定メール");
+    expect(auth.resetPasswordForEmail).not.toHaveBeenCalled();
+    expect(await screen.findByRole("status")).toHaveTextContent(
+      "迷惑メールフォルダ",
+    );
   });
 
   it("04 セッション確立後にダッシュボードを表示しログアウトする", async () => {

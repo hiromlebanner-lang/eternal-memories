@@ -745,6 +745,7 @@ img {
   background: rgb(58 145 165 / 9%);
   font-size: 12px;
   line-height: 1.45;
+  white-space: pre-line;
 }
 
 .form-message--error {

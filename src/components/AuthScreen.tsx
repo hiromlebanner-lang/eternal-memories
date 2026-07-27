@@ -218,6 +218,12 @@ export function AuthScreen({
                     autoComplete="email"
                     readOnly={!inputInteractionStarted}
                     onFocus={(event) => preventRestoredFocus(event.currentTarget)}
+                    onInvalid={(event) => {
+                      if (mode === "forgot") {
+                        event.preventDefault();
+                        setError("正しいメールアドレスを入力してください");
+                      }
+                    }}
                     inputMode="email"
                     required
                   />

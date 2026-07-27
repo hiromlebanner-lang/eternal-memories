@@ -85,6 +85,21 @@ describe("認証画面", () => {
     expect(props.onPasswordResetRequest).toHaveBeenCalledWith("hana@example.com");
   });
 
+  it("不正なメールアドレスでは再設定処理を呼ばない", async () => {
+    const user = userEvent.setup();
+    const props = authProps();
+    render(<AuthScreen {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "パスワードを忘れた場合" }));
+    await user.type(screen.getByLabelText("メールアドレス"), "invalid-email");
+    await user.click(screen.getByRole("button", { name: /再設定メールを送信/ }));
+
+    expect(props.onPasswordResetRequest).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "正しいメールアドレスを入力してください",
+    );
+  });
+
   it("05 新しいパスワードの一致を検証して更新する", async () => {
     const user = userEvent.setup();
     const props = authProps(true);

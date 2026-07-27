@@ -88,13 +88,17 @@ type ViewMode = "map" | "photos";
 type AlbumLoadStatus = "loading" | "success" | "error";
 
 function authReturnURL(mode?: "recovery") {
-  const url = new URL(window.location.pathname, window.location.origin);
+  const url = new URL(
+    mode === "recovery" ? "/reset-password" : window.location.pathname,
+    window.location.origin,
+  );
   const query = new URLSearchParams(window.location.search);
   const inviteCode = query.get("join");
   const inviteToken = query.get("invite");
-  if (inviteCode) url.searchParams.set("join", inviteCode);
-  if (inviteToken) url.searchParams.set("invite", inviteToken);
-  if (mode === "recovery") url.searchParams.set("auth", "recovery");
+  if (mode !== "recovery") {
+    if (inviteCode) url.searchParams.set("join", inviteCode);
+    if (inviteToken) url.searchParams.set("invite", inviteToken);
+  }
   return url.toString();
 }
 
@@ -132,9 +136,8 @@ export default function App() {
   const [authMessage, setAuthMessage] = useState("");
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const [authRevision, setAuthRevision] = useState(0);
-  const [passwordRecovery, setPasswordRecovery] = useState(
-    () => new URLSearchParams(window.location.search).get("auth") === "recovery",
-  );
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
+  const passwordResetInFlight = useRef(false);
 
   useEffect(() => {
     if (!supabase) return;
@@ -144,11 +147,15 @@ export default function App() {
     let lastSessionSignature: string | null | undefined;
     const callbackURL = new URL(window.location.href);
     const oauthError = callbackURL.searchParams.get("error");
+    const oauthErrorCode = callbackURL.searchParams.get("error_code");
     const oauthDescription = callbackURL.searchParams.get("error_description");
     if (oauthError) {
       console.error("OAuth callback failed:", oauthError, oauthDescription);
       setAuthMessage(
-        oauthError === "access_denied"
+        oauthErrorCode === "otp_expired" ||
+          oauthDescription?.toLowerCase().includes("expired")
+          ? "パスワード再設定リンクの有効期限が切れているか、無効です。もう一度再設定メールを送信してください。"
+          : oauthError === "access_denied"
           ? "ログインがキャンセルされました"
           : oauthDescription?.toLowerCase().includes("already")
             ? "このメールアドレスは別のログイン方法で登録されています"
@@ -181,6 +188,16 @@ export default function App() {
         authEventReceived = true;
         applySession(nextSession, event === "SIGNED_IN");
         if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
+        if (
+          event === "INITIAL_SESSION" &&
+          window.location.pathname === "/reset-password" &&
+          !nextSession
+        ) {
+          setPasswordRecovery(false);
+          setAuthMessage(
+            "パスワード再設定リンクの有効期限が切れているか、無効です。もう一度再設定メールを送信してください。",
+          );
+        }
         if (event === "SIGNED_OUT") void clearPrivateOfflineData();
       },
     );
@@ -268,18 +285,34 @@ export default function App() {
   };
 
   const requestPasswordReset = async (email: string) => {
-    if (!supabase) return;
+    if (!supabase || passwordResetInFlight.current) return;
+    const normalizedEmail = email.trim().toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+      throw new Error("正しいメールアドレスを入力してください");
+    }
+    passwordResetInFlight.current = true;
     setAuthBusy(true);
     setAuthMessage("");
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: authReturnURL("recovery"),
+      const response = await fetch("/api/password-reset", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: normalizedEmail }),
       });
-      if (error) throw error;
+      const result = (await response
+        .json()
+        .catch(() => ({}))) as { message?: string };
+      if (!response.ok) {
+        throw new Error(
+          result.message ||
+            "メールを送信できませんでした。時間を空けてもう一度お試しください。",
+        );
+      }
       setAuthMessage(
-        "パスワード再設定メールを送信しました。メールに記載されたリンクを開いてください。",
+        `${result.message}\n迷惑メールフォルダと入力したメールアドレスをご確認ください。\n数分待っても届かない場合は、時間を空けて再送してください。`,
       );
     } finally {
+      passwordResetInFlight.current = false;
       setAuthBusy(false);
     }
   };
@@ -293,7 +326,7 @@ export default function App() {
       if (error) throw error;
       setPasswordRecovery(false);
       const url = new URL(window.location.href);
-      url.searchParams.delete("auth");
+      url.pathname = "/";
       url.searchParams.delete("code");
       url.hash = "";
       window.history.replaceState({}, "", url);
@@ -301,6 +334,15 @@ export default function App() {
       await clearPrivateOfflineData();
       setAuthMessage(
         "パスワードを更新しました。新しいパスワードでログインしてください。",
+      );
+    } catch (error) {
+      console.error("Password update failed:", error);
+      const message = error instanceof Error ? error.message.toLowerCase() : "";
+      throw new Error(
+        /session|token|expired|otp/.test(message)
+          ? "パスワード再設定リンクの有効期限が切れているか、無効です。もう一度再設定メールを送信してください。"
+          : "パスワードを更新できませんでした。時間を空けてもう一度お試しください。",
+        { cause: error },
       );
     } finally {
       setAuthBusy(false);
