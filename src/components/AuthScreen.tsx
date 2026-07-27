@@ -4,7 +4,6 @@ import {
   KeyRound,
   LockKeyhole,
   Mail,
-  Map,
   Sparkles,
 } from "lucide-react";
 import { useState, type FormEvent } from "react";
@@ -81,8 +80,11 @@ export function AuthScreen({
       <section className="auth-hero" aria-label="Eternal memoriesについて">
         <div className="brand-lockup">
           <span className="brand-mark">
-            <Map size={28} strokeWidth={2.4} />
-            <span>●</span>
+            <img
+              className="brand-app-icon"
+              src="/eternal-memories-map-pin.jpg"
+              alt=""
+            />
           </span>
           <span>Eternal memories</span>
         </div>
@@ -95,12 +97,6 @@ export function AuthScreen({
             <span>思い出は</span>
             <span className="auth-title-detail">写真をひらくたびに色づいていく。</span>
           </h1>
-        </div>
-        <div className="auth-hero-visual">
-          <img
-            src="/eternal-memories-map-pin.jpg"
-            alt="星空と風景を描いた地図ピンのイラスト"
-          />
         </div>
       </section>
 
