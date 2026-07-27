@@ -1,7 +1,6 @@
 import {
   ArrowLeft,
   ArrowRight,
-  Chrome,
   KeyRound,
   LockKeyhole,
   Mail,
@@ -37,7 +36,6 @@ export function AuthScreen({
   onEmailSignup,
   onPasswordResetRequest,
   onPasswordUpdate,
-  onGoogleLogin,
 }: AuthScreenProps) {
   const [mode, setMode] = useState<AuthMode>("login");
   const [displayName, setDisplayName] = useState("");
@@ -119,9 +117,6 @@ export function AuthScreen({
           </p>
           <p>
             旅行やお出かけの思い出を撮影場所とともに残し、写真を地図上から閲覧・管理できます。そしていつでも思い出に浸れます。
-          </p>
-          <p>
-            Googleアカウントまたはメールアドレスでログインしてご利用いただけます。
           </p>
         </article>
         <div className="auth-card">
@@ -297,26 +292,6 @@ export function AuthScreen({
               </button>
             ) : null}
           </form>
-
-          {!recoveryMode && mode !== "forgot" ? (
-            <>
-              <div className="auth-divider">
-                <span>または</span>
-              </div>
-
-              <div className="social-auth-buttons">
-                <button
-                  className="secondary-button"
-                  type="button"
-                  disabled={busy || !configured}
-                  onClick={() => void onGoogleLogin()}
-                >
-                  <Chrome size={19} />
-                  Googleで続ける
-                </button>
-              </div>
-            </>
-          ) : null}
         </div>
         <p className="auth-footnote">
           アルバムの内容は、ログイン済みかつ参加権限を持つメンバーだけが閲覧できます。
