@@ -29,10 +29,40 @@ export interface Album {
   invite_code_expires_at?: string;
   invite_settings_supported?: boolean;
   cover_url?: string | null;
+  cover_photo_id?: string | null;
+  owner_name?: string;
+  updated_at?: string;
+  visibility?: "private" | "limited" | "public";
+  icon?: string;
+  theme_color?: string;
+  is_favorite?: boolean;
+  folder_id?: string | null;
+  folder_name?: string | null;
+  tags?: string[];
+  member_names?: string[];
+  last_viewed_at?: string | null;
+  offline_enabled?: boolean;
   role: AlbumRole;
   photo_count?: number;
   member_count?: number;
 }
+
+export interface AlbumFolder {
+  id: string;
+  user_id: string;
+  name: string;
+  icon: string;
+  theme_color: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export type AlbumSort =
+  | "updated"
+  | "created"
+  | "name"
+  | "photos"
+  | "favorites";
 
 export interface AlbumInviteSettings {
   invite_code: string;
@@ -101,7 +131,7 @@ export interface NearbyInvitation {
 
 export interface AlbumPhoto {
   id: string;
-  album_id: string;
+  album_id: string | null;
   author_id: string;
   author_name: string;
   author_avatar_url?: string | null;
@@ -112,8 +142,8 @@ export interface AlbumPhoto {
   category: PhotoCategory;
   captured_at: string;
   created_at: string;
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   visibility?: "album_only" | "global";
 }
 
@@ -137,6 +167,70 @@ export interface PhotoLocationGroup {
   latitude: number;
   longitude: number;
   photos: AlbumPhoto[];
+}
+
+export interface DriveRoutePoint {
+  latitude: number;
+  longitude: number;
+  recorded_at: string;
+  accuracy: number;
+  speed: number | null;
+  heading: number | null;
+  altitude: number | null;
+  sequence_no: number;
+}
+
+export interface DriveCoordinate {
+  latitude: number;
+  longitude: number;
+}
+
+export interface DriveDestination extends DriveCoordinate {
+  id: string;
+  name: string;
+  address: string;
+}
+
+export interface PlannedDriveRoute {
+  coordinates: DriveCoordinate[];
+  distanceMeters: number;
+  durationSeconds: number;
+  fetchedAt: string;
+}
+
+export interface DriveLog {
+  id: string;
+  user_id: string;
+  title: string;
+  started_at: string;
+  ended_at: string;
+  start_latitude: number;
+  start_longitude: number;
+  end_latitude: number;
+  end_longitude: number;
+  start_label: string;
+  end_label: string;
+  distance_meters: number;
+  actual_distance_meters?: number;
+  duration_seconds: number;
+  actual_duration_seconds?: number;
+  destination_name: string | null;
+  destination_address: string | null;
+  destination_latitude: number | null;
+  destination_longitude: number | null;
+  planned_distance_meters: number | null;
+  planned_duration_seconds: number | null;
+  planned_route: DriveCoordinate[] | null;
+  created_at: string;
+}
+
+export interface DriveDistanceSummary {
+  todayMeters: number;
+  weekMeters: number;
+  monthMeters: number;
+  totalMeters: number;
+  weekStart: string;
+  weekEnd: string;
 }
 
 export const CATEGORY_META: Record<

@@ -55,3 +55,16 @@ self.addEventListener("notificationclick", (event) => {
       }),
   );
 });
+
+self.addEventListener("sync", (event) => {
+  if (event.tag !== "mapalbum-sync") return;
+  event.waitUntil(
+    self.clients
+      .matchAll({ type: "window", includeUncontrolled: true })
+      .then((clients) => {
+        for (const client of clients) {
+          client.postMessage({ type: "MAPALBUM_SYNC_REQUEST" });
+        }
+      }),
+  );
+});

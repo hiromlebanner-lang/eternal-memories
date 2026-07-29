@@ -40,7 +40,7 @@ describe("認証画面", () => {
     await user.type(screen.getByLabelText("メールアドレス"), "hana@example.com");
     await user.type(screen.getByLabelText("パスワード"), "password1");
     await user.click(
-      screen.getByRole("button", { name: /登録して確認メールを受け取る/ }),
+      screen.getByRole("button", { name: /登録してはじめる/ }),
     );
 
     expect(props.onEmailSignup).toHaveBeenCalledWith(

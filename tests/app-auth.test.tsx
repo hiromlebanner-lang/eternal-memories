@@ -29,7 +29,10 @@ const data = vi.hoisted(() => ({
   createAlbum: vi.fn(),
   deletePhoto: vi.fn(),
   loadAlbumInviteCode: vi.fn(),
+  loadAlbumFolders: vi.fn(),
   loadAlbums: vi.fn(),
+  loadRecentAlbumPhotos: vi.fn(),
+  loadMyDirectAlbumInvitations: vi.fn(),
   loadManagedJoinRequests: vi.fn(),
   loadMyPendingJoinRequests: vi.fn(),
   loadPhotos: vi.fn(),
@@ -60,6 +63,12 @@ vi.mock("../src/lib/supabase", () => ({
       },
     })),
     removeChannel: vi.fn(),
+    functions: {
+      invoke: vi.fn(async () => ({
+        data: { role: "user", suspended: false },
+        error: null,
+      })),
+    },
   },
 }));
 vi.mock("../src/lib/data", () => data);
@@ -94,6 +103,12 @@ beforeEach(() => {
   );
   vi.stubGlobal("fetch", fetchMock);
   data.loadAlbums.mockResolvedValue({ data: [], fromCache: false });
+  data.loadAlbumFolders.mockResolvedValue([]);
+  data.loadRecentAlbumPhotos.mockResolvedValue({
+    data: [],
+    fromCache: false,
+  });
+  data.loadMyDirectAlbumInvitations.mockResolvedValue([]);
   data.loadManagedJoinRequests.mockResolvedValue([]);
   data.loadMyPendingJoinRequests.mockResolvedValue([]);
   data.loadPhotos.mockResolvedValue({ data: [], fromCache: false });
@@ -109,7 +124,7 @@ describe("Supabase Auth連携", () => {
     await user.type(screen.getByLabelText("メールアドレス"), " Hana@Example.COM ");
     await user.type(screen.getByLabelText("パスワード"), "password1");
     await user.click(
-      screen.getByRole("button", { name: /登録して確認メールを受け取る/ }),
+      screen.getByRole("button", { name: /登録してはじめる/ }),
     );
 
     expect(auth.signUp).toHaveBeenCalledWith(
@@ -128,7 +143,7 @@ describe("Supabase Auth連携", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Eternal memoriesにログイン");
-    expect(screen.queryByText("最初のアルバムを作りましょう")).not.toBeInTheDocument();
+    expect(screen.queryByText("アルバムはまだありません。")).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("メールアドレス"), " Hana@Example.COM ");
     await user.type(screen.getByLabelText("パスワード"), " Password1 ");
     await user.click(
@@ -165,7 +180,7 @@ describe("Supabase Auth連携", () => {
       });
     });
 
-    await screen.findByText("最初のアルバムを作りましょう");
+    await screen.findByText("アルバムはまだありません。");
     expect(data.loadAlbums).toHaveBeenCalledWith("user-1");
 
     await act(async () => {
@@ -205,7 +220,7 @@ describe("Supabase Auth連携", () => {
       await screen.findByText("アルバムを読み込んでいます…"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("最初のアルバムを作りましょう"),
+      screen.queryByText("アルバムはまだありません。"),
     ).not.toBeInTheDocument();
 
     await act(async () => {
@@ -213,7 +228,7 @@ describe("Supabase Auth連携", () => {
     });
 
     expect(
-      await screen.findByText("最初のアルバムを作りましょう"),
+      await screen.findByText("アルバムはまだありません。"),
     ).toBeInTheDocument();
   });
 
@@ -250,7 +265,7 @@ describe("Supabase Auth連携", () => {
         },
       });
     });
-    await screen.findByText("最初のアルバムを作りましょう");
+    await screen.findByText("アルバムはまだありません。");
     await user.click(screen.getAllByRole("button", { name: "設定" })[0]);
     await user.click(screen.getByRole("button", { name: /ログアウト/ }));
     expect(auth.signOut).not.toHaveBeenCalled();

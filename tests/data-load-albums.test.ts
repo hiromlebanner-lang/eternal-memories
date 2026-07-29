@@ -17,6 +17,11 @@ const cache = vi.hoisted(() => ({
 
 const supabase = vi.hoisted(() => ({
   from: vi.fn(),
+  storage: {
+    from: vi.fn(() => ({
+      createSignedUrls: vi.fn(async () => ({ data: [], error: null })),
+    })),
+  },
 }));
 
 vi.mock("idb-keyval", () => ({
@@ -70,6 +75,19 @@ beforeEach(() => {
           data: database.photoRows,
           error: database.photoError,
         });
+      }
+      if (table === "user_album_preferences" || table === "album_folders") {
+        return {
+          eq: vi.fn(async () => ({ data: [], error: null })),
+        };
+      }
+      if (table === "album_tags") {
+        return Promise.resolve({ data: [], error: null });
+      }
+      if (table === "profiles") {
+        return {
+          in: vi.fn(async () => ({ data: [], error: null })),
+        };
       }
       throw new Error(`Unexpected table: ${table}`);
     },

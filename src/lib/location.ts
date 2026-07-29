@@ -24,8 +24,15 @@ export function groupPhotosByLocation(
   photos: AlbumPhoto[],
   thresholdMeters = 60,
 ): PhotoLocationGroup[] {
+  const locatedPhotos = photos.filter(
+    (
+      photo,
+    ): photo is AlbumPhoto & { latitude: number; longitude: number } =>
+      photo.latitude != null && photo.longitude != null,
+  );
+
   if (thresholdMeters <= 0) {
-    return photos.map((photo) => ({
+    return locatedPhotos.map((photo) => ({
       id: photo.id,
       latitude: photo.latitude,
       longitude: photo.longitude,
@@ -33,10 +40,11 @@ export function groupPhotosByLocation(
     }));
   }
 
-  type Bucket = { anchor: AlbumPhoto; photos: AlbumPhoto[] };
+  type LocatedPhoto = AlbumPhoto & { latitude: number; longitude: number };
+  type Bucket = { anchor: LocatedPhoto; photos: LocatedPhoto[] };
   const buckets: Bucket[] = [];
   const grid = new Map<string, number[]>();
-  const toCartesianCell = (photo: AlbumPhoto) => {
+  const toCartesianCell = (photo: LocatedPhoto) => {
     const latitude = (photo.latitude * Math.PI) / 180;
     const longitude = (photo.longitude * Math.PI) / 180;
     const radiusAtLatitude = EARTH_RADIUS_METERS * Math.cos(latitude);
@@ -51,7 +59,7 @@ export function groupPhotosByLocation(
   };
   const key = (x: number, y: number, z: number) => `${x}:${y}:${z}`;
 
-  for (const photo of photos) {
+  for (const photo of locatedPhotos) {
     const [cellX, cellY, cellZ] = toCartesianCell(photo);
     let nearestBucket = -1;
     let nearestDistance = Number.POSITIVE_INFINITY;

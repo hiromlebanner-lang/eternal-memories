@@ -39,6 +39,7 @@ export function AlbumManager({
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
 
   const submitCreate = async (event: FormEvent) => {
     event.preventDefault();
@@ -71,13 +72,11 @@ export function AlbumManager({
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumID);
   const deleteSelectedAlbum = async () => {
     if (!selectedAlbum || selectedAlbum.owner_id !== currentUserID) return;
-    if (!window.confirm(`「${selectedAlbum.name}」を削除しますか？この操作は取り消せません。`)) {
-      return;
-    }
     setBusy(true);
     setError("");
     try {
       await onDelete(selectedAlbum.id);
+      setConfirmDelete(false);
       onClose();
     } catch (caught) {
       setError(
@@ -89,6 +88,7 @@ export function AlbumManager({
   };
 
   return (
+    <>
     <Modal
       title={
         action === "create"
@@ -142,7 +142,7 @@ export function AlbumManager({
                 className="danger-button"
                 type="button"
                 disabled={busy}
-                onClick={deleteSelectedAlbum}
+                onClick={() => setConfirmDelete(true)}
               >
                 <Trash2 size={19} />
                 <span>
@@ -230,5 +230,36 @@ export function AlbumManager({
         </form>
       ) : null}
     </Modal>
+    {confirmDelete && selectedAlbum ? (
+      <Modal
+        title={`「${selectedAlbum.name}」を削除しますか？`}
+        onClose={() => {
+          if (!busy) setConfirmDelete(false);
+        }}
+        footer={
+          <div className="logout-confirm-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={busy}
+              onClick={() => setConfirmDelete(false)}
+            >
+              キャンセル
+            </button>
+            <button
+              className="danger-button"
+              type="button"
+              disabled={busy}
+              onClick={() => void deleteSelectedAlbum()}
+            >
+              {busy ? "削除中…" : "実行する"}
+            </button>
+          </div>
+        }
+      >
+        <p>この操作は元に戻せません。アルバム内の写真も削除されます。</p>
+      </Modal>
+    ) : null}
+    </>
   );
 }

@@ -150,7 +150,6 @@ export default async function handler(
       return;
     }
 
-    const accessToken = authorization.slice("Bearer ".length);
     const client = createClient(supabaseURL, supabaseAnonKey, {
       global: { headers: { Authorization: authorization } },
       auth: {
@@ -162,7 +161,7 @@ export default async function handler(
     const {
       data: { user },
       error: userError,
-    } = await client.auth.getUser(accessToken);
+    } = await client.auth.getUser();
     if (userError || !user) {
       sendJSON(response, 401, "ログイン情報を確認できませんでした");
       return;

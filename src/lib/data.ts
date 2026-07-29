@@ -1,6 +1,7 @@
 import { del, get, keys, set } from "idb-keyval";
 import type {
   Album,
+  AlbumFolder,
   AlbumInviteSettings,
   AlbumInvitation,
   AlbumJoinRequest,
@@ -19,7 +20,8 @@ type LoadResult<T> = {
 };
 
 const albumCacheKey = (userID: string) => `mapalbum:albums:${userID}`;
-const photoCacheKey = (albumID: string) => `mapalbum:photos:${albumID}`;
+const photoCacheKey = (userID: string, albumID: string) =>
+  `mapalbum:photos:${userID}:${albumID}`;
 
 export async function clearPrivateOfflineData() {
   try {
@@ -37,10 +39,12 @@ export async function clearPrivateOfflineData() {
   }
 
   if ("caches" in window) {
-    await Promise.allSettled([
-      caches.delete("mapalbum-photo-cache"),
-      caches.delete("mapalbum-api-cache"),
-    ]);
+    const cacheNames = await caches.keys();
+    await Promise.allSettled(
+      cacheNames
+        .filter((name) => name.startsWith("mapalbum-"))
+        .map((name) => caches.delete(name)),
+    );
   }
 }
 
@@ -66,7 +70,7 @@ function supabaseErrorMessage(error: unknown) {
 function isMissingColumnError(error: unknown) {
   return (
     supabaseErrorCode(error) === "42703" &&
-    /owner_id|members_can_invite|invite_code_enabled|invite_code_expires_at/i.test(
+    /owner_id|members_can_invite|invite_code_enabled|invite_code_expires_at|cover_photo_id|visibility|theme_color|icon/i.test(
       supabaseErrorMessage(error),
     )
   );
@@ -90,7 +94,7 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
       const current = await client
         .from("albums")
         .select(
-          "id, name, description, owner_id, created_by, created_at, members_can_invite",
+          "id, name, description, owner_id, created_by, created_at, updated_at, members_can_invite, cover_photo_id, visibility, icon, theme_color",
         )
         .order("created_at", { ascending: false });
 
@@ -111,20 +115,41 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
       { data: membershipRows, error: membershipError },
       { data: photoRows, error: photoError },
       { data: memberRows, error: memberError },
+      { data: preferenceRows, error: preferenceError },
+      { data: folderRows, error: folderError },
+      { data: tagRows, error: tagError },
     ] = await Promise.all([
       loadAlbumRows(),
       client
         .from("album_members")
         .select("album_id, role")
         .eq("user_id", userID),
-      client.from("photos").select("album_id"),
-      client.from("album_members").select("album_id"),
+      client
+        .from("photos")
+        .select("id, album_id, storage_path, captured_at, created_at"),
+      client
+        .from("album_members")
+        .select("album_id, user_id, profiles(display_name)"),
+      client
+        .from("user_album_preferences")
+        .select(
+          "album_id, folder_id, is_favorite, last_viewed_at",
+        )
+        .eq("user_id", userID),
+      client
+        .from("album_folders")
+        .select("id, user_id, name, icon, theme_color, created_at, updated_at")
+        .eq("user_id", userID),
+      client.from("album_tags").select("album_id, tag"),
     ]);
 
     if (albumError) throw albumError;
     if (membershipError) throw membershipError;
     if (photoError) throw photoError;
     if (memberError) throw memberError;
+    if (preferenceError) throw preferenceError;
+    if (folderError) throw folderError;
+    if (tagError) throw tagError;
 
     const roleByAlbum = new Map(
       (membershipRows ?? []).map((membership) => [
@@ -134,12 +159,123 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
     );
     const photoCounts = new Map<string, number>();
     const memberCounts = new Map<string, number>();
+    const memberNames = new Map<string, string[]>();
+    const newestPhotoByAlbum = new Map<
+      string,
+      {
+        id: string;
+        storage_path: string;
+        captured_at: string;
+        created_at: string;
+      }
+    >();
 
     for (const row of photoRows ?? []) {
+      if (!row.album_id) continue;
       photoCounts.set(row.album_id, (photoCounts.get(row.album_id) ?? 0) + 1);
+      const current = newestPhotoByAlbum.get(row.album_id);
+      if (
+        !current ||
+        new Date(row.captured_at ?? row.created_at).getTime() >
+          new Date(current.captured_at ?? current.created_at).getTime()
+      ) {
+        newestPhotoByAlbum.set(row.album_id, {
+          id: row.id,
+          storage_path: row.storage_path,
+          captured_at: row.captured_at,
+          created_at: row.created_at,
+        });
+      }
     }
     for (const row of memberRows ?? []) {
       memberCounts.set(row.album_id, (memberCounts.get(row.album_id) ?? 0) + 1);
+      const profile = Array.isArray(row.profiles)
+        ? row.profiles[0]
+        : row.profiles;
+      if (profile?.display_name) {
+        const names = memberNames.get(row.album_id) ?? [];
+        names.push(profile.display_name);
+        memberNames.set(row.album_id, names);
+      }
+    }
+
+    const ownerIDs = [
+      ...new Set(
+        (albumRows ?? []).map((album) =>
+          "owner_id" in album && typeof album.owner_id === "string"
+            ? album.owner_id
+            : album.created_by,
+        ),
+      ),
+    ];
+    const { data: ownerRows, error: ownerError } =
+      ownerIDs.length > 0
+        ? await client
+            .from("profiles")
+            .select("id, display_name")
+            .in("id", ownerIDs)
+        : { data: [], error: null };
+    if (ownerError) throw ownerError;
+    const ownerNames = new Map(
+      (ownerRows ?? []).map((profile) => [
+        profile.id,
+        profile.display_name || "オーナー",
+      ]),
+    );
+
+    const preferenceByAlbum = new Map(
+      (preferenceRows ?? []).map((preference) => [
+        preference.album_id,
+        preference,
+      ]),
+    );
+    const foldersByID = new Map(
+      ((folderRows ?? []) as AlbumFolder[]).map((folder) => [folder.id, folder]),
+    );
+    const tagsByAlbum = new Map<string, string[]>();
+    for (const row of tagRows ?? []) {
+      const tags = tagsByAlbum.get(row.album_id) ?? [];
+      tags.push(row.tag);
+      tagsByAlbum.set(row.album_id, tags);
+    }
+
+    const coverPhotoByAlbum = new Map<
+      string,
+      { id: string; storagePath: string }
+    >();
+    for (const album of albumRows ?? []) {
+      const explicitID =
+        "cover_photo_id" in album && typeof album.cover_photo_id === "string"
+          ? album.cover_photo_id
+          : null;
+      const explicit = explicitID
+        ? (photoRows ?? []).find((photo) => photo.id === explicitID)
+        : undefined;
+      const fallback = newestPhotoByAlbum.get(album.id);
+      const photo = explicit ?? fallback;
+      if (photo?.storage_path) {
+        coverPhotoByAlbum.set(album.id, {
+          id: photo.id,
+          storagePath: photo.storage_path,
+        });
+      }
+    }
+    const coverPaths = [
+      ...new Set(
+        [...coverPhotoByAlbum.values()].map((photo) => photo.storagePath),
+      ),
+    ];
+    const coverURLByPath = new Map<string, string>();
+    if (coverPaths.length > 0) {
+      const { data: coverURLs, error: coverError } = await client.storage
+        .from("album-photos")
+        .createSignedUrls(coverPaths, 60 * 60 * 24);
+      if (coverError) throw coverError;
+      for (const cover of coverURLs ?? []) {
+        if (cover.path && cover.signedUrl) {
+          coverURLByPath.set(cover.path, cover.signedUrl);
+        }
+      }
     }
 
     const seenAlbumIDs = new Set<string>();
@@ -156,6 +292,11 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
 
       const membersCanInvite =
         "members_can_invite" in album && Boolean(album.members_can_invite);
+      const preference = preferenceByAlbum.get(album.id);
+      const folder = preference?.folder_id
+        ? foldersByID.get(preference.folder_id)
+        : undefined;
+      const coverPhoto = coverPhotoByAlbum.get(album.id);
       result.push({
         id: album.id,
         name: album.name,
@@ -164,12 +305,45 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
         created_by: album.created_by,
         owner_id: ownerID,
         created_at: album.created_at,
+        updated_at:
+          "updated_at" in album && typeof album.updated_at === "string"
+            ? album.updated_at
+            : album.created_at,
         members_can_invite: membersCanInvite,
         can_invite:
           role === "owner" ||
           role === "admin" ||
           (role === "member" && membersCanInvite),
-        cover_url: null,
+        cover_url: coverPhoto
+          ? (coverURLByPath.get(coverPhoto.storagePath) ?? null)
+          : null,
+        cover_photo_id:
+          "cover_photo_id" in album && typeof album.cover_photo_id === "string"
+            ? album.cover_photo_id
+            : null,
+        owner_name: ownerNames.get(ownerID) ?? "オーナー",
+        visibility:
+          "visibility" in album &&
+          (album.visibility === "public" ||
+            album.visibility === "limited" ||
+            album.visibility === "private")
+            ? album.visibility
+            : "private",
+        icon:
+          "icon" in album && typeof album.icon === "string"
+            ? album.icon
+            : "images",
+        theme_color:
+          "theme_color" in album && typeof album.theme_color === "string"
+            ? album.theme_color
+            : "#c65476",
+        is_favorite: preference?.is_favorite ?? false,
+        folder_id: preference?.folder_id ?? null,
+        folder_name: folder?.name ?? null,
+        tags: tagsByAlbum.get(album.id) ?? [],
+        member_names: memberNames.get(album.id) ?? [],
+        last_viewed_at: preference?.last_viewed_at ?? null,
+        offline_enabled: false,
         role,
         photo_count: photoCounts.get(album.id) ?? 0,
         member_count: memberCounts.get(album.id) ?? 1,
@@ -192,7 +366,171 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
   }
 }
 
+export async function saveAlbumPreference(input: {
+  userID: string;
+  albumID: string;
+  isFavorite?: boolean;
+  folderID?: string | null;
+  viewedNow?: boolean;
+}) {
+  const client = requireSupabase();
+  const updates: Record<string, unknown> = {
+    user_id: input.userID,
+    album_id: input.albumID,
+    updated_at: new Date().toISOString(),
+  };
+  if (input.isFavorite !== undefined) {
+    updates.is_favorite = input.isFavorite;
+  }
+  if (input.folderID !== undefined) updates.folder_id = input.folderID;
+  if (input.viewedNow) updates.last_viewed_at = new Date().toISOString();
+
+  const { error } = await client
+    .from("user_album_preferences")
+    .upsert(updates, { onConflict: "user_id,album_id" });
+  if (error) {
+    throw toAppError(error, "アルバムの設定を保存できませんでした。");
+  }
+}
+
+export async function loadAlbumFolders(userID: string): Promise<AlbumFolder[]> {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("album_folders")
+    .select("id, user_id, name, icon, theme_color, created_at, updated_at")
+    .eq("user_id", userID)
+    .order("name");
+  if (error) throw toAppError(error, "フォルダを読み込めませんでした。");
+  return (data ?? []) as AlbumFolder[];
+}
+
+export async function createAlbumFolder(
+  userID: string,
+  name: string,
+  themeColor: string,
+) {
+  const client = requireSupabase();
+  const { data, error } = await client
+    .from("album_folders")
+    .insert({
+      user_id: userID,
+      name: name.trim(),
+      theme_color: themeColor,
+    })
+    .select("id, user_id, name, icon, theme_color, created_at, updated_at")
+    .single();
+  if (error) throw toAppError(error, "フォルダを作成できませんでした。");
+  return data as AlbumFolder;
+}
+
+export async function updateAlbumFolder(input: {
+  folderID: string;
+  name: string;
+  themeColor: string;
+}) {
+  const client = requireSupabase();
+  const { error } = await client
+    .from("album_folders")
+    .update({
+      name: input.name.trim(),
+      theme_color: input.themeColor,
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", input.folderID);
+  if (error) throw toAppError(error, "フォルダを更新できませんでした。");
+}
+
+export async function deleteAlbumFolder(folderID: string) {
+  const client = requireSupabase();
+  const { error } = await client
+    .from("album_folders")
+    .delete()
+    .eq("id", folderID);
+  if (error) throw toAppError(error, "フォルダを削除できませんでした。");
+}
+
+export async function updateAlbumPresentation(input: {
+  albumID: string;
+  coverPhotoID: string | null;
+  visibility: "private" | "limited" | "public";
+  icon: string;
+  themeColor: string;
+  tags: string[];
+}) {
+  const client = requireSupabase();
+  const normalizedTags = [
+    ...new Set(
+      input.tags
+        .map((tag) => tag.trim())
+        .filter(Boolean)
+      .map((tag) => tag.slice(0, 30)),
+    ),
+  ].slice(0, 12);
+  const { error } = await client.rpc("update_album_presentation", {
+    p_album_id: input.albumID,
+    p_cover_photo_id: input.coverPhotoID,
+    p_visibility: input.visibility,
+    p_icon: input.icon,
+    p_theme_color: input.themeColor,
+    p_tags: normalizedTags,
+  });
+  if (error) {
+    throw toAppError(error, "アルバムの表示設定を保存できませんでした。");
+  }
+}
+
+export async function loadRecentAlbumPhotos(
+  userID: string,
+  limit = 12,
+): Promise<LoadResult<AlbumPhoto[]>> {
+  const cacheKey = `mapalbum:recent-photos:${userID}`;
+  const client = requireSupabase();
+  try {
+    const { data, error } = await client
+      .from("photos")
+      .select(
+        "id, album_id, author_id, author_name, storage_path, title, caption, category, captured_at, created_at, latitude, longitude, visibility",
+      )
+      .not("album_id", "is", null)
+      .order("created_at", { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    const rows = data ?? [];
+    const paths = rows.map((photo) => photo.storage_path).filter(Boolean);
+    const signedURLByPath = new Map<string, string>();
+    if (paths.length > 0) {
+      const { data: signedURLs, error: signedError } = await client.storage
+        .from("album-photos")
+        .createSignedUrls(paths, 60 * 60 * 24);
+      if (signedError) throw signedError;
+      for (const signed of signedURLs ?? []) {
+        if (signed.path && signed.signedUrl) {
+          signedURLByPath.set(signed.path, signed.signedUrl);
+        }
+      }
+    }
+    const photos = rows.map((photo) => ({
+      ...photo,
+      image_url: signedURLByPath.get(photo.storage_path) ?? "",
+      category: photo.category as PhotoCategory,
+      latitude: photo.latitude == null ? null : Number(photo.latitude),
+      longitude: photo.longitude == null ? null : Number(photo.longitude),
+      visibility:
+        photo.visibility === "global"
+          ? ("global" as const)
+          : ("album_only" as const),
+    }));
+    await set(cacheKey, photos);
+    return { data: photos, fromCache: false };
+  } catch (error) {
+    const cached = await get<AlbumPhoto[]>(cacheKey);
+    if (cached) return { data: cached, fromCache: true };
+    throw error;
+  }
+}
+
 export async function loadPhotos(
+  userID: string,
   albumID: string,
 ): Promise<LoadResult<AlbumPhoto[]>> {
   const client = requireSupabase();
@@ -245,15 +583,15 @@ export async function loadPhotos(
       category: photo.category as PhotoCategory,
       captured_at: photo.captured_at,
       created_at: photo.created_at,
-      latitude: Number(photo.latitude),
-      longitude: Number(photo.longitude),
+      latitude: photo.latitude == null ? null : Number(photo.latitude),
+      longitude: photo.longitude == null ? null : Number(photo.longitude),
       visibility: photo.visibility === "global" ? "global" : "album_only",
     }));
 
-    await set(photoCacheKey(albumID), photos);
+    await set(photoCacheKey(userID, albumID), photos);
     return { data: photos, fromCache: false };
   } catch (error) {
-    const cached = await get<AlbumPhoto[]>(photoCacheKey(albumID));
+    const cached = await get<AlbumPhoto[]>(photoCacheKey(userID, albumID));
     if (cached) return { data: cached, fromCache: true };
     throw error;
   }
@@ -307,8 +645,8 @@ export async function loadGlobalPhotos(offset = 0, limit = 24) {
     category: photo.category as PhotoCategory,
     captured_at: photo.captured_at,
     created_at: photo.created_at,
-    latitude: Number(photo.latitude),
-    longitude: Number(photo.longitude),
+    latitude: photo.latitude == null ? null : Number(photo.latitude),
+    longitude: photo.longitude == null ? null : Number(photo.longitude),
     visibility: "global",
   }));
   return { photos, hasMore: rows.length === limit };
@@ -341,6 +679,31 @@ export async function downloadAlbumPhoto(photoID: string) {
   const fileName =
     disposition.match(/filename="([^"]+)"/i)?.[1] ??
     `eternal-memories_${new Date().toISOString().slice(0, 10).replaceAll("-", "")}.jpg`;
+  const file = new File([blob], fileName, {
+    type: blob.type || response.headers.get("Content-Type") || "image/jpeg",
+  });
+  const shareData: ShareData = {
+    files: [file],
+    title: "Eternal memories",
+    text: "Eternal memoriesの写真",
+  };
+  const canShareFile =
+    typeof navigator.share === "function" &&
+    (typeof navigator.canShare !== "function" ||
+      navigator.canShare(shareData));
+
+  if (canShareFile) {
+    try {
+      await navigator.share(shareData);
+      return "shared" as const;
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        return "cancelled" as const;
+      }
+      console.warn("[PhotoDownload] 共有メニューを開けないためダウンロードします", error);
+    }
+  }
+
   const objectURL = URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = objectURL;
@@ -350,6 +713,7 @@ export async function downloadAlbumPhoto(photoID: string) {
   anchor.click();
   anchor.remove();
   window.setTimeout(() => URL.revokeObjectURL(objectURL), 1_000);
+  return "downloaded" as const;
 }
 
 export async function createAlbum(name: string, description: string) {
@@ -599,6 +963,35 @@ export async function createEmailInvitation(input: {
   };
 }
 
+export async function deleteOwnAccount() {
+  const client = requireSupabase();
+  const { data, error } = await client.functions.invoke("delete-account", {
+    body: { confirmation: "DELETE_MY_ACCOUNT" },
+  });
+  if (error) {
+    let message = "";
+    const context = (error as { context?: unknown }).context;
+    if (context instanceof Response) {
+      const body = (await context.clone().json().catch(() => null)) as {
+        error?: unknown;
+      } | null;
+      if (typeof body?.error === "string") message = body.error;
+    }
+    throw new Error(
+      message ||
+        "アカウントを削除できませんでした。時間を空けてもう一度お試しください。",
+      { cause: error },
+    );
+  }
+  if (
+    !data ||
+    typeof data !== "object" ||
+    Reflect.get(data, "deleted") !== true
+  ) {
+    throw new Error("アカウントを削除できませんでした。");
+  }
+}
+
 export async function loadMyDirectAlbumInvitations() {
   const client = requireSupabase();
   const { data, error } = await client.rpc(
@@ -735,7 +1128,7 @@ export async function rotateAlbumInviteCode(
 }
 
 export async function uploadPhoto(input: {
-  albumID: string;
+  albumID: string | null;
   authorID: string;
   authorName: string;
   file: File;
@@ -743,13 +1136,32 @@ export async function uploadPhoto(input: {
   caption: string;
   category: PhotoCategory;
   capturedAt: string;
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   visibility: "album_only" | "global";
+  photoID?: string;
 }) {
   const client = requireSupabase();
-  const photoID = crypto.randomUUID();
-  const storagePath = `${input.albumID}/${input.authorID}/${photoID}.jpg`;
+  const photoID = input.photoID ?? crypto.randomUUID();
+  if (input.photoID) {
+    const { data: existingPhoto, error: existingError } = await client
+      .from("photos")
+      .select("id, storage_path")
+      .eq("id", photoID)
+      .maybeSingle();
+    if (existingError) {
+      throw toAppError(existingError, "写真の同期状態を確認できませんでした。");
+    }
+    if (existingPhoto) {
+      return {
+        photoID: existingPhoto.id,
+        storagePath: existingPhoto.storage_path,
+      };
+    }
+  }
+  const storagePath = input.albumID
+    ? `${input.albumID}/${input.authorID}/${photoID}.jpg`
+    : `global/${input.authorID}/${photoID}.jpg`;
   console.info("[PhotoUpload] Storage開始", {
     fileName: input.file.name,
     storagePath,
@@ -847,8 +1259,10 @@ export async function uploadPhoto(input: {
       );
     throw new Error(
       permissionDenied
-        ? "写真を保存できませんでした。ログイン状態またはアルバムの参加権限を確認してください。"
-        : "写真を保存できませんでした。時間をおいてもう一度お試しください。",
+        ? input.albumID
+          ? "写真を保存できませんでした。ログイン状態またはアルバムの参加権限を確認してください。"
+          : "写真を投稿できませんでした。ログイン状態をご確認ください。"
+        : "写真を投稿できませんでした。もう一度お試しください。",
     );
   }
   console.info("[PhotoUpload] DB登録成功", {
@@ -866,8 +1280,8 @@ export async function updatePhoto(
     title: string;
     category: PhotoCategory;
     captured_at: string;
-    latitude: number;
-    longitude: number;
+    latitude: number | null;
+    longitude: number | null;
     visibility: "album_only" | "global";
   },
 ) {
@@ -1020,6 +1434,15 @@ export async function changeMemberRole(
     p_album_id: albumID,
     p_user_id: userID,
     p_role: role,
+  });
+  if (error) throw error;
+}
+
+export async function removeAlbumMember(albumID: string, userID: string) {
+  const client = requireSupabase();
+  const { error } = await client.rpc("remove_album_member", {
+    p_album_id: albumID,
+    p_user_id: userID,
   });
   if (error) throw error;
 }

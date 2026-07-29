@@ -6,8 +6,12 @@ import { album } from "./fixtures";
 const invitationMock = vi.hoisted(() => vi.fn());
 const updateSettingsMock = vi.hoisted(() => vi.fn());
 const rotateCodeMock = vi.hoisted(() => vi.fn());
+const sentInvitationsMock = vi.hoisted(() => vi.fn());
+const revokeInvitationMock = vi.hoisted(() => vi.fn());
 vi.mock("../src/lib/data", () => ({
   createEmailInvitation: invitationMock,
+  loadSentAlbumInvitations: sentInvitationsMock,
+  revokeDirectAlbumInvitation: revokeInvitationMock,
   rotateAlbumInviteCode: rotateCodeMock,
   updateAlbumInviteSettings: updateSettingsMock,
 }));
@@ -28,6 +32,8 @@ beforeEach(() => {
   });
   updateSettingsMock.mockResolvedValue(undefined);
   rotateCodeMock.mockResolvedValue("NEWCODE123456789");
+  sentInvitationsMock.mockResolvedValue([]);
+  revokeInvitationMock.mockResolvedValue(undefined);
 });
 
 it("10 招待URLとQRをサブパスを保って発行する", () => {
@@ -157,7 +163,7 @@ it("招待を許可された一般メンバーは対象アルバムを共有で�
   expect(
     screen.getByText("このアルバムではメンバー招待が許可されています"),
   ).toBeInTheDocument();
-  expect(screen.getByLabelText("承認後の権限")).toHaveValue("member");
+  expect(screen.getByLabelText("参加時の権限")).toHaveValue("member");
 });
 
 it("設定RPC未適用でも基本の招待URL・QR・コードを表示する", () => {
@@ -207,7 +213,7 @@ it("Web Share APIでiPhoneの標準共有シートを開き成功を通知する
 
   expect(share).toHaveBeenCalledWith({
     title: `${album().name}への招待`,
-    text: expect.stringContaining("参加にはオーナーまたは管理者の承認"),
+    text: expect.stringContaining("リンクを開いて参加するか選択"),
     url: `${window.location.origin}/apps/mapalbum/?join=ABCD1234`,
   });
   expect(onNotice).toHaveBeenCalledWith("招待URLを共有しました");

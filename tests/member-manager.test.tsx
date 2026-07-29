@@ -1,30 +1,18 @@
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, expect, it, vi } from "vitest";
-import type { AlbumJoinRequest } from "../src/types";
+import type { AlbumMember } from "../src/types";
 import { album } from "./fixtures";
 
 const data = vi.hoisted(() => ({
   changeMemberRole: vi.fn(),
-  loadJoinRequests: vi.fn(),
   loadMembers: vi.fn(),
-  reviewJoinRequest: vi.fn(),
+  removeAlbumMember: vi.fn(),
 }));
 
 vi.mock("../src/lib/data", () => data);
 
 import { MemberManager } from "../src/components/MemberManager";
-
-const request: AlbumJoinRequest = {
-  id: "request-1",
-  album_id: album().id,
-  user_id: "applicant-1",
-  requested_role: "viewer",
-  status: "pending",
-  created_at: "2026-07-25T01:30:00.000Z",
-  display_name: "はなこ",
-  email: "hana@example.com",
-};
 
 const currentUser = {
   id: "owner-1",
@@ -32,18 +20,34 @@ const currentUser = {
   displayName: "オーナー",
 };
 
+const members: AlbumMember[] = [
+  {
+    album_id: album().id,
+    user_id: "owner-1",
+    role: "owner",
+    joined_at: "2026-07-25T00:00:00.000Z",
+    display_name: "オーナー",
+    email: "owner@example.com",
+  },
+  {
+    album_id: album().id,
+    user_id: "member-1",
+    role: "member",
+    joined_at: "2026-07-26T00:00:00.000Z",
+    display_name: "はなこ",
+    email: "hana@example.com",
+  },
+];
+
 beforeEach(() => {
-  data.loadMembers.mockResolvedValue([]);
-  data.loadJoinRequests.mockResolvedValue([]);
-  data.reviewJoinRequest.mockResolvedValue("request-1");
+  vi.clearAllMocks();
+  data.loadMembers.mockResolvedValue(members);
+  data.removeAlbumMember.mockResolvedValue(undefined);
 });
 
-it("申請詳細・希望権限を表示し選択した権限で一度だけ承認する", async () => {
+it("オーナーは確認後に対象メンバーだけを退出させる", async () => {
   const user = userEvent.setup();
   const onChanged = vi.fn();
-  data.loadJoinRequests
-    .mockResolvedValueOnce([request])
-    .mockResolvedValueOnce([]);
 
   render(
     <MemberManager
@@ -55,58 +59,36 @@ it("申請詳細・希望権限を表示し選択した権限で一度だけ承�
   );
 
   expect(await screen.findByText("はなこ")).toBeInTheDocument();
-  expect(screen.getByText("hana@example.com")).toBeInTheDocument();
-  expect(screen.getByText(/申請日時：/)).toBeInTheDocument();
-  expect(screen.getByText("希望する権限：閲覧のみ")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "退出" })).toBeInTheDocument();
 
-  await user.selectOptions(
-    screen.getByLabelText("はなこの承認後の権限"),
-    "admin",
-  );
-  await user.click(
-    screen.getByRole("button", { name: "はなこの参加申請を承認" }),
-  );
+  await user.click(screen.getByRole("button", { name: "退出" }));
+  expect(
+    screen.getByRole("dialog", {
+      name: "この参加者をアルバムから退出させますか？",
+    }),
+  ).toBeInTheDocument();
 
+  await user.click(screen.getByRole("button", { name: "退出させる" }));
   await waitFor(() =>
-    expect(data.reviewJoinRequest).toHaveBeenCalledWith(
-      "request-1",
-      true,
-      "admin",
+    expect(data.removeAlbumMember).toHaveBeenCalledWith(
+      album().id,
+      "member-1",
     ),
   );
-  expect(data.reviewJoinRequest).toHaveBeenCalledOnce();
-  await waitFor(() =>
-    expect(
-      screen.getByText("現在、参加申請はありません"),
-    ).toBeInTheDocument(),
-  );
+  expect(data.removeAlbumMember).toHaveBeenCalledOnce();
   expect(onChanged).toHaveBeenCalledOnce();
+  expect(screen.queryByText("はなこ")).not.toBeInTheDocument();
 });
 
-it("拒否後は未処理一覧から即時に消す", async () => {
-  const user = userEvent.setup();
-  data.loadJoinRequests
-    .mockResolvedValueOnce([request])
-    .mockResolvedValueOnce([]);
+it("管理者には退出操作を表示しない", async () => {
   render(
     <MemberManager
       album={album("admin")}
-      currentUser={currentUser}
+      currentUser={{ ...currentUser, id: "admin-1" }}
       onClose={vi.fn()}
     />,
   );
 
-  await user.click(
-    await screen.findByRole("button", {
-      name: "はなこの参加申請を拒否",
-    }),
-  );
-  expect(data.reviewJoinRequest).toHaveBeenCalledWith(
-    "request-1",
-    false,
-    "viewer",
-  );
-  expect(
-    await screen.findByText("現在、参加申請はありません"),
-  ).toBeInTheDocument();
+  expect(await screen.findByText("はなこ")).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: "退出" })).not.toBeInTheDocument();
 });

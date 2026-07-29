@@ -71,7 +71,7 @@ interface AuthScreenProps {
   ) => Promise<void>;
   onPasswordResetRequest: (email: string) => Promise<void>;
   onPasswordUpdate: (password: string) => Promise<void>;
-  onGoogleLogin: () => Promise<void>;
+  onGoogleLogin?: () => Promise<void>;
 }
 
 export function AuthScreen({
@@ -333,7 +333,7 @@ export function AuthScreen({
                     ? "再設定メールを送信"
                     : mode === "login"
                       ? "ログイン"
-                      : "登録して確認メールを受け取る"}
+                      : "登録してはじめる"}
               {!busy ? <ArrowRight size={18} /> : null}
             </button>
 

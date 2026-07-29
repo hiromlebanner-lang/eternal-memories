@@ -21,6 +21,25 @@ const from = vi.hoisted(() =>
     if (table === "albums") return { select: albumsSelect };
     if (table === "album_members") return { select: albumMembersSelect };
     if (table === "photos") return { select: photosSelect };
+    if (table === "user_album_preferences" || table === "album_folders") {
+      return {
+        select: vi.fn(() => ({
+          eq: vi.fn(async () => ({ data: [], error: null })),
+        })),
+      };
+    }
+    if (table === "album_tags") {
+      return {
+        select: vi.fn(async () => ({ data: [], error: null })),
+      };
+    }
+    if (table === "profiles") {
+      return {
+        select: vi.fn(() => ({
+          in: vi.fn(async () => ({ data: [], error: null })),
+        })),
+      };
+    }
     throw new Error(`Unexpected table: ${table}`);
   }),
 );

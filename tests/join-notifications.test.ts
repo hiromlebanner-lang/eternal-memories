@@ -141,7 +141,7 @@ it("iPhone PWAで通知拒否済みなら設定アプリの変更手順を表示
 
   await expect(
     notifications.setJoinRequestNotificationsEnabled(true),
-  ).rejects.toThrow("「設定」→「通知」→「MapAlbum」");
+  ).rejects.toThrow("「設定」→「通知」→「Eternal memories」");
   expect(Notification.requestPermission).not.toHaveBeenCalled();
 });
 

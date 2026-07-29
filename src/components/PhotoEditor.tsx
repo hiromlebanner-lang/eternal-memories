@@ -33,13 +33,15 @@ interface PhotoEditorValues {
   caption: string;
   category: PhotoCategory;
   capturedAt: string;
-  latitude: number;
-  longitude: number;
+  latitude: number | null;
+  longitude: number | null;
   visibility: "album_only" | "global";
 }
 
 interface PhotoEditorProps {
   photo?: AlbumPhoto;
+  hasAlbum?: boolean;
+  initialVisibility?: "album_only" | "global";
   onClose: () => void;
   onSave: (
     values: PhotoEditorValues,
@@ -79,7 +81,13 @@ function Recenter({ latitude, longitude }: { latitude: number; longitude: number
   return null;
 }
 
-export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
+export function PhotoEditor({
+  photo,
+  hasAlbum = true,
+  initialVisibility = "album_only",
+  onClose,
+  onSave,
+}: PhotoEditorProps) {
   const cameraInput = useRef<HTMLInputElement>(null);
   const libraryInput = useRef<HTMLInputElement>(null);
   const selectionRequest = useRef(0);
@@ -91,7 +99,11 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
   const [caption, setCaption] = useState(photo?.caption ?? "");
   const [category, setCategory] = useState<PhotoCategory>(photo?.category ?? "scenery");
   const [visibility, setVisibility] = useState<"album_only" | "global">(
-    photo?.visibility === "global" ? "global" : "album_only",
+    photo?.visibility === "global"
+      ? "global"
+      : hasAlbum
+        ? initialVisibility
+        : "global",
   );
   const [capturedAt, setCapturedAt] = useState(
     toInputDate(photo?.captured_at ?? new Date()),
@@ -155,7 +167,9 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
       setLongitude(position.longitude);
     } catch (caught) {
       if (requestID !== selectionRequest.current) return;
-      setError(caught instanceof Error ? caught.message : "位置情報を取得できません。");
+      if (hasAlbum) {
+        setError(caught instanceof Error ? caught.message : "位置情報を取得できません。");
+      }
     } finally {
       if (requestID === selectionRequest.current) setLocating(false);
     }
@@ -229,17 +243,23 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
       setError("写真を撮影するか、ライブラリから選択してください。");
       return;
     }
-    if (latitude == null || longitude == null) {
+    if (hasAlbum && (latitude == null || longitude == null)) {
       setError("撮影場所を取得または地図で指定してください。");
       return;
     }
+    if ((latitude == null) !== (longitude == null)) {
+      setError("撮影場所の緯度・経度が正しくありません。");
+      return;
+    }
     if (
-      !Number.isFinite(latitude) ||
-      !Number.isFinite(longitude) ||
-      latitude < -90 ||
-      latitude > 90 ||
-      longitude < -180 ||
-      longitude > 180
+      latitude != null &&
+      longitude != null &&
+      (!Number.isFinite(latitude) ||
+        !Number.isFinite(longitude) ||
+        latitude < -90 ||
+        latitude > 90 ||
+        longitude < -180 ||
+        longitude > 180)
     ) {
       setError("撮影場所の緯度・経度が正しくありません。");
       return;
@@ -415,25 +435,38 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
 
           <fieldset className="visibility-picker">
             <legend>投稿先</legend>
-            <label>
-              <input
-                type="radio"
-                name="visibility"
-                checked={visibility === "album_only"}
-                onChange={() => setVisibility("album_only")}
-              />
-              このアルバムのみ
-            </label>
-            <label>
-              <input
-                type="radio"
-                name="visibility"
-                checked={visibility === "global"}
-                onChange={() => setVisibility("global")}
-              />
-              このアルバム＋みんなの思い出
-            </label>
-            {visibility === "global" ? (
+            {hasAlbum ? (
+              <>
+                <label>
+                  <input
+                    type="radio"
+                    name="visibility"
+                    checked={visibility === "album_only"}
+                    onChange={() => setVisibility("album_only")}
+                  />
+                  このアルバムのみ
+                </label>
+                <label>
+                  <input
+                    type="radio"
+                    name="visibility"
+                    checked={visibility === "global"}
+                    onChange={() => setVisibility("global")}
+                  />
+                  みんなへ投稿（このアルバムにも表示）
+                </label>
+              </>
+            ) : (
+              <label>
+                <input type="radio" name="visibility" checked readOnly />
+                みんなへ投稿
+              </label>
+            )}
+            {!hasAlbum ? (
+              <p>
+                参加中のアルバムはありません。この写真は「みんな」へ投稿できます。
+              </p>
+            ) : visibility === "global" ? (
               <p>
                 この写真は、アルバムの参加者以外のログインユーザーにも表示されます。
               </p>
@@ -457,7 +490,9 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
                 <small>
                   {latitude != null && longitude != null
                     ? `${latitude.toFixed(5)}, ${longitude.toFixed(5)}`
-                    : "まだ取得できていません"}
+                    : hasAlbum
+                      ? "まだ取得できていません"
+                      : "位置情報なしでも投稿できます"}
                 </small>
               </div>
               <button type="button" onClick={() => void locateNow()} disabled={locating}>
@@ -475,6 +510,11 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
               >
                 <TileLayer
                   url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+                  detectRetina
+                  keepBuffer={3}
+                  maxNativeZoom={19}
+                  maxZoom={19}
+                  updateWhenZooming={false}
                 />
                 <LocationEvents
                   onPick={(nextLatitude, nextLongitude) => {
@@ -524,11 +564,15 @@ export function PhotoEditor({ photo, onClose, onSave }: PhotoEditorProps) {
                 : "保存しています…"
               : photo
                 ? "変更を保存"
-                : "アルバムに追加"}
+                : hasAlbum
+                  ? "アルバムに追加"
+                  : "みんなへ投稿"}
           </button>
           <p className="privacy-note">
             <MapPin size={14} />
-            位置情報はこの共有アルバムのメンバーだけが閲覧できます。
+            {hasAlbum
+              ? "位置情報はこの共有アルバムのメンバーだけが閲覧できます。"
+              : "位置情報は許可した場合のみ写真に追加されます。"}
           </p>
         </div>
       </form>

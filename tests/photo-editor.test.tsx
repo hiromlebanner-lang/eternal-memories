@@ -117,3 +117,31 @@ it.each([1, 3, 10, 20])(
     );
   },
 );
+
+it("アルバム未参加でも位置情報なしで「みんな」へ投稿できる", async () => {
+  positionMock.mockRejectedValue(new Error("位置情報は許可されていません"));
+  const user = userEvent.setup();
+  const onSave = vi.fn(async () => []);
+  const { container } = render(
+    <PhotoEditor hasAlbum={false} onClose={vi.fn()} onSave={onSave} />,
+  );
+  const file = new File(["photo"], "global.jpg", { type: "image/jpeg" });
+  const input =
+    container.querySelectorAll<HTMLInputElement>('input[type="file"]')[1];
+  fireEvent.change(input, { target: { files: [file] } });
+
+  await screen.findByText(
+    "参加中のアルバムはありません。この写真は「みんな」へ投稿できます。",
+  );
+  await user.click(screen.getByRole("button", { name: "みんなへ投稿" }));
+
+  expect(onSave).toHaveBeenCalledWith(
+    expect.objectContaining({
+      files: [file],
+      latitude: null,
+      longitude: null,
+      visibility: "global",
+    }),
+    expect.any(Function),
+  );
+});

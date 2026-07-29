@@ -3,9 +3,9 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Download,
   Edit3,
   MapPin,
+  Share2,
   Trash2,
   UserRound,
 } from "lucide-react";
@@ -24,7 +24,9 @@ interface PhotoDetailProps {
   onClose: () => void;
   onEdit: (photo: AlbumPhoto) => void;
   onDelete: (photo: AlbumPhoto) => Promise<void>;
-  onDownload?: (photoID: string) => Promise<void>;
+  onDownload?: (
+    photoID: string,
+  ) => Promise<"shared" | "downloaded" | "cancelled">;
 }
 
 export function PhotoDetail({
@@ -46,6 +48,7 @@ export function PhotoDetail({
   const [deleting, setDeleting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [downloadMessage, setDownloadMessage] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const downloadingRef = useRef(false);
 
   const resolvedIndex = Math.min(index, Math.max(0, photos.length - 1));
@@ -54,12 +57,12 @@ export function PhotoDetail({
   const meta = CATEGORY_META[photo.category];
 
   const remove = async () => {
-    if (!window.confirm("この写真を削除しますか？この操作は取り消せません。")) return;
     setDeleting(true);
     try {
       await onDelete(photo);
       if (photos.length <= 1) onClose();
     } finally {
+      setConfirmDelete(false);
       setDeleting(false);
     }
   };
@@ -70,12 +73,18 @@ export function PhotoDetail({
     setDownloading(true);
     setDownloadMessage("");
     try {
-      await onDownload(photo.id);
-      setDownloadMessage("画像を保存しました");
+      const result = await onDownload(photo.id);
+      setDownloadMessage(
+        result === "shared"
+          ? "保存・共有メニューを開きました"
+          : result === "downloaded"
+            ? "画像を保存しました"
+            : "",
+      );
     } catch (error) {
       console.error("[PhotoDownload] 画像の保存に失敗しました", error);
       setDownloadMessage(
-        "画像を保存できませんでした。もう一度お試しください",
+        "画像を保存・共有できませんでした。もう一度お試しください",
       );
     } finally {
       downloadingRef.current = false;
@@ -84,6 +93,7 @@ export function PhotoDetail({
   };
 
   return (
+    <>
     <Modal
       title={photos.length > 1 ? `この場所の写真 ${photos.length}枚` : "写真の詳細"}
       onClose={onClose}
@@ -183,15 +193,17 @@ export function PhotoDetail({
                 }).format(new Date(photo.captured_at))}
               </dd>
             </div>
-            <div>
-              <dt>
-                <MapPin size={17} />
-                撮影位置
-              </dt>
-              <dd>
-                {photo.latitude.toFixed(5)}, {photo.longitude.toFixed(5)}
-              </dd>
-            </div>
+            {photo.latitude != null && photo.longitude != null ? (
+              <div>
+                <dt>
+                  <MapPin size={17} />
+                  撮影位置
+                </dt>
+                <dd>
+                  {photo.latitude.toFixed(5)}, {photo.longitude.toFixed(5)}
+                </dd>
+              </div>
+            ) : null}
           </dl>
 
           {canDownload || canEdit(photo) || canDelete(photo) ? (
@@ -203,8 +215,8 @@ export function PhotoDetail({
                   disabled={downloading}
                   onClick={() => void download()}
                 >
-                  <Download size={17} />
-                  {downloading ? "保存中…" : "ダウンロード"}
+                  <Share2 size={17} />
+                  {downloading ? "準備中…" : "保存・共有"}
                 </button>
               ) : null}
               {canEdit(photo) ? (
@@ -222,7 +234,7 @@ export function PhotoDetail({
                   className="danger-button"
                   type="button"
                   disabled={deleting}
-                  onClick={() => void remove()}
+                  onClick={() => setConfirmDelete(true)}
                 >
                   <Trash2 size={17} />
                   {deleting ? "削除中…" : "削除"}
@@ -238,5 +250,36 @@ export function PhotoDetail({
         </div>
       </div>
     </Modal>
+    {confirmDelete ? (
+      <Modal
+        title="この写真を削除しますか？"
+        onClose={() => {
+          if (!deleting) setConfirmDelete(false);
+        }}
+        footer={
+          <div className="logout-confirm-actions">
+            <button
+              className="secondary-button"
+              type="button"
+              disabled={deleting}
+              onClick={() => setConfirmDelete(false)}
+            >
+              キャンセル
+            </button>
+            <button
+              className="danger-button"
+              type="button"
+              disabled={deleting}
+              onClick={() => void remove()}
+            >
+              {deleting ? "削除中…" : "実行する"}
+            </button>
+          </div>
+        }
+      >
+        <p>この操作は元に戻せません。</p>
+      </Modal>
+    ) : null}
+    </>
   );
 }

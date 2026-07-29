@@ -119,7 +119,7 @@ export default defineConfig({
             urlPattern: /^https:\/\/[a-c]\.tile\.openstreetmap\.org\/.*/i,
             handler: "CacheFirst",
             options: {
-              cacheName: "mapalbum-map-tiles",
+              cacheName: "mapalbum-map-tiles-v2",
               expiration: {
                 maxEntries: 700,
                 maxAgeSeconds: 60 * 60 * 24 * 30,
@@ -131,7 +131,7 @@ export default defineConfig({
             urlPattern: /^https:\/\/.*\.supabase\.co\/storage\/v1\/object\/.*/i,
             handler: "CacheFirst",
             options: {
-              cacheName: "mapalbum-photo-cache",
+              cacheName: "mapalbum-photo-cache-v2",
               expiration: {
                 maxEntries: 250,
                 maxAgeSeconds: 60 * 60 * 24 * 14,

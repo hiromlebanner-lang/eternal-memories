@@ -1,12 +1,14 @@
 import {
   ShieldCheck,
   UserRound,
+  UserRoundMinus,
   Users,
 } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import {
   changeMemberRole,
   loadMembers,
+  removeAlbumMember,
 } from "../lib/data";
 import type {
   Album,
@@ -45,8 +47,10 @@ export function MemberManager({
   const [members, setMembers] = useState<AlbumMember[]>([]);
   const [loading, setLoading] = useState(true);
   const [changingID, setChangingID] = useState("");
+  const [removingMember, setRemovingMember] = useState<AlbumMember | null>(null);
   const [error, setError] = useState("");
   const isManager = album.role === "owner" || album.role === "admin";
+  const isAlbumOwner = album.role === "owner";
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -96,10 +100,35 @@ export function MemberManager({
     }
   };
 
+  const removeMember = async () => {
+    if (!isAlbumOwner || !removingMember || removingMember.role === "owner") {
+      return;
+    }
+
+    setChangingID(removingMember.user_id);
+    setError("");
+    try {
+      await removeAlbumMember(album.id, removingMember.user_id);
+      setMembers((current) =>
+        current.filter((member) => member.user_id !== removingMember.user_id),
+      );
+      setRemovingMember(null);
+      await onChanged?.();
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "参加者を退出させられませんでした。",
+      );
+    } finally {
+      setChangingID("");
+    }
+  };
+
   const memberCount = members.length || album.member_count || 1;
 
   return (
-    <Modal title="メンバー管理" onClose={onClose}>
+    <Modal title="参加者管理" onClose={onClose}>
       <div className="member-manager">
         <div className="member-manager__summary">
           <Users size={21} aria-hidden="true" />
@@ -166,34 +195,50 @@ export function MemberManager({
                       {member.email ||
                         (isOwner ? "アルバムのオーナー" : "参加メンバー")}
                     </small>
+                    <small>
+                      参加日: {new Date(member.joined_at).toLocaleDateString("ja-JP")}
+                    </small>
                   </span>
 
-                  {isManager && !isOwner ? (
-                    <label className="member-role-field">
-                      <span className="share-sr-only">{memberName}の権限</span>
-                      <select
-                        value={member.role}
-                        aria-label={`${memberName}の権限`}
+                  <span className="member-row__actions">
+                    {isManager && !isOwner ? (
+                      <label className="member-role-field">
+                        <span className="share-sr-only">{memberName}の権限</span>
+                        <select
+                          value={member.role}
+                          aria-label={`${memberName}の権限`}
+                          disabled={isChanging}
+                          onChange={(event) =>
+                            void setRole(
+                              member,
+                              event.target.value as Exclude<AlbumRole, "owner">,
+                            )
+                          }
+                        >
+                          {ASSIGNABLE_ROLES.map((role) => (
+                            <option value={role} key={role}>
+                              {ROLE_LABEL[role]}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <span className={`role-badge role-badge--${member.role}`}>
+                        {ROLE_LABEL[member.role]}
+                      </span>
+                    )}
+                    {isAlbumOwner && !isOwner && !isSelf ? (
+                      <button
+                        className="member-remove-button"
+                        type="button"
                         disabled={isChanging}
-                        onChange={(event) =>
-                          void setRole(
-                            member,
-                            event.target.value as Exclude<AlbumRole, "owner">,
-                          )
-                        }
+                        onClick={() => setRemovingMember(member)}
                       >
-                        {ASSIGNABLE_ROLES.map((role) => (
-                          <option value={role} key={role}>
-                            {ROLE_LABEL[role]}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  ) : (
-                    <span className={`role-badge role-badge--${member.role}`}>
-                      {ROLE_LABEL[member.role]}
-                    </span>
-                  )}
+                        <UserRoundMinus size={16} />
+                        退出
+                      </button>
+                    ) : null}
+                  </span>
                 </article>
               );
             })}
@@ -204,6 +249,39 @@ export function MemberManager({
           オーナーはすべての操作、管理者は招待・承認・メンバー管理、メンバーは写真の投稿と自分の写真の編集、閲覧のみはアルバムの閲覧ができます。写真の削除は投稿者本人、オーナー、管理者だけが行えます。オーナーの権限は変更できません。
         </p>
       </div>
+      {removingMember ? (
+        <Modal
+          title="この参加者をアルバムから退出させますか？"
+          onClose={() => {
+            if (!changingID) setRemovingMember(null);
+          }}
+          footer={
+            <div className="logout-confirm-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={Boolean(changingID)}
+                onClick={() => setRemovingMember(null)}
+              >
+                キャンセル
+              </button>
+              <button
+                className="danger-button"
+                type="button"
+                disabled={Boolean(changingID)}
+                onClick={() => void removeMember()}
+              >
+                {changingID ? "退出処理中…" : "退出させる"}
+              </button>
+            </div>
+          }
+        >
+          <p className="member-remove-confirm">
+            退出後、この参加者はアルバムの写真や情報を閲覧・投稿できなくなります。
+            過去に投稿した写真は削除されません。
+          </p>
+        </Modal>
+      ) : null}
     </Modal>
   );
 }

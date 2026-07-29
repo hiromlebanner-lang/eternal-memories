@@ -1,10 +1,12 @@
 import type { AuthChangeEvent, Session, User } from "@supabase/supabase-js";
 import {
   Bell,
+  CarFront,
   Images,
   Camera,
   ChevronDown,
   CircleUserRound,
+  CloudCog,
   CloudOff,
   Grid2X2,
   Globe2,
@@ -13,14 +15,19 @@ import {
   Moon,
   Search,
   Settings,
+  ShieldCheck,
+  Star,
   Sun,
   Trash2,
+  UserRoundX,
   UserPlus,
   Wifi,
   X,
 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AlbumManager } from "./components/AlbumManager";
+import { AlbumHome } from "./components/AlbumHome";
+import { AlbumSettingsPanel } from "./components/AlbumSettingsPanel";
 import {
   AccountInfoMenu,
   AccountInfoPage,
@@ -30,29 +37,42 @@ import {
 } from "./components/AccountInfoPages";
 import type { AccountPageRoute } from "./components/AccountInfoPages";
 import { AuthScreen } from "./components/AuthScreen";
+import {
+  DriveLogPanel,
+  hasRecoverableDrive,
+} from "./components/DriveLogPanel";
 import { MapPanel } from "./components/MapPanel";
 import { MemberManager } from "./components/MemberManager";
 import { Modal } from "./components/Modal";
-import { NearbyPeopleSettings } from "./components/NearbyPeopleSettings";
+import { OfflineCachePanel } from "./components/OfflineCachePanel";
 import { PhotoDetail } from "./components/PhotoDetail";
 import { PhotoEditor } from "./components/PhotoEditor";
 import { PhotoGrid } from "./components/PhotoGrid";
 import { ShareAlbumModal } from "./components/ShareAlbumModal";
+import { SiteAdminPanel } from "./components/SiteAdminPanel";
 import {
   clearPrivateOfflineData,
   createAlbum,
+  createAlbumFolder,
   deleteAlbum,
+  deleteAlbumFolder,
+  deleteOwnAccount,
   deleteProfileAvatar,
   deletePhoto,
   downloadAlbumPhoto,
   loadAlbumInviteSettings,
+  loadAlbumFolders,
   loadAlbums,
   loadInviteCodePreview,
   loadGlobalPhotos,
   loadMyDirectAlbumInvitations,
   loadPhotos,
+  loadRecentAlbumPhotos,
   requestAlbumMembership,
   respondToDirectAlbumInvitation,
+  saveAlbumPreference,
+  updateAlbumFolder,
+  updateAlbumPresentation,
   updateProfileDisplayName,
   updatePhoto,
   uploadProfileAvatar,
@@ -60,25 +80,31 @@ import {
 } from "./lib/data";
 import { readPhotoMetadata } from "./lib/image";
 import {
+  cacheAlbumForOffline,
+  clearOfflineCache,
+  flushOfflineQueue,
+  getOfflineAlbumIDs,
+  getOfflineStats,
+  queueOfflinePhoto,
+  removeAlbumOffline,
+  restorePinnedOfflineMedia,
+} from "./lib/offline";
+import {
   canDeletePhoto,
   canEditPhoto,
   canInviteToAlbum,
   canPostPhoto,
 } from "./lib/permissions";
-import {
-  createNearbyInvitation,
-  respondToNearbyInvitation,
-  useNearbyPeople,
-} from "./lib/nearby";
 import { isSupabaseConfigured, supabase } from "./lib/supabase";
+import { getSiteAdminContext } from "./lib/siteAdmin";
+import type { SiteAdminContext } from "./lib/siteAdmin";
 import { CATEGORY_META } from "./types";
 import type {
   Album,
+  AlbumFolder,
   AlbumInvitation,
   AlbumPhoto,
   AppUser,
-  NearbyInvitation,
-  NearbyUser,
   PhotoCategory,
   PhotoLocationGroup,
   PhotoUploadFailure,
@@ -382,6 +408,12 @@ export default function App() {
     <Dashboard
       user={user}
       authRevision={authRevision}
+      onAccountDeleted={async () => {
+        await supabase?.auth.signOut({ scope: "local" }).catch(() => undefined);
+        await clearPrivateOfflineData();
+        setSession(null);
+        setAuthMessage("アカウントを削除しました");
+      }}
       onSignOut={async () => {
         await supabase?.auth.signOut();
         await clearPrivateOfflineData();
@@ -393,10 +425,12 @@ export default function App() {
 function Dashboard({
   user: sessionUser,
   authRevision,
+  onAccountDeleted,
   onSignOut,
 }: {
   user: AppUser;
   authRevision: number;
+  onAccountDeleted: () => Promise<void>;
   onSignOut: () => Promise<void>;
 }) {
   const [user, setUser] = useState(sessionUser);
@@ -406,7 +440,10 @@ function Dashboard({
     useState<AlbumLoadStatus>("loading");
   const [albumLoadError, setAlbumLoadError] = useState("");
   const [selectedAlbumID, setSelectedAlbumID] = useState("");
+  const [albumHome, setAlbumHome] = useState(true);
   const [photos, setPhotos] = useState<AlbumPhoto[]>([]);
+  const [recentAlbumPhotos, setRecentAlbumPhotos] = useState<AlbumPhoto[]>([]);
+  const [albumFolders, setAlbumFolders] = useState<AlbumFolder[]>([]);
   const [globalPhotos, setGlobalPhotos] = useState<AlbumPhoto[]>([]);
   const [globalMode, setGlobalMode] = useState(false);
   const [globalLoading, setGlobalLoading] = useState(false);
@@ -416,9 +453,14 @@ function Dashboard({
   const [loading, setLoading] = useState(true);
   const [offline, setOffline] = useState(!navigator.onLine);
   const [usingCache, setUsingCache] = useState(false);
+  const [syncState, setSyncState] =
+    useState<"idle" | "syncing" | "failed">("idle");
+  const [pendingSyncCount, setPendingSyncCount] = useState(0);
   const [toast, setToast] = useState("");
 
   const [showsAlbumManager, setShowsAlbumManager] = useState(false);
+  const [showsAlbumSettings, setShowsAlbumSettings] = useState(false);
+  const [showsOfflineCache, setShowsOfflineCache] = useState(false);
   const [showsPhotoEditor, setShowsPhotoEditor] = useState(false);
   const [editingPhoto, setEditingPhoto] = useState<AlbumPhoto>();
   const [detailPhotos, setDetailPhotos] = useState<AlbumPhoto[]>([]);
@@ -427,12 +469,25 @@ function Dashboard({
   const [sharingAlbum, setSharingAlbum] = useState<Album>();
   const [showsMembers, setShowsMembers] = useState(false);
   const [showsSettings, setShowsSettings] = useState(false);
+  const [siteAdminContext, setSiteAdminContext] =
+    useState<SiteAdminContext | null>(null);
+  const [siteRoleReady, setSiteRoleReady] = useState(false);
+  const [showsSiteAdmin, setShowsSiteAdmin] = useState(
+    () => window.location.pathname === "/site-admin",
+  );
+  const [driveMode, setDriveMode] = useState(() =>
+    hasRecoverableDrive(sessionUser.id),
+  );
+  const [driveRecording, setDriveRecording] = useState(false);
   const [accountPage, setAccountPage] = useState<AccountPageRoute | null>(() =>
     accountRouteFromPath(window.location.pathname),
   );
   const accountReturnPath = useRef("/");
   const [showsLogoutConfirm, setShowsLogoutConfirm] = useState(false);
   const [logoutBusy, setLogoutBusy] = useState(false);
+  const [showsDeleteAccountConfirm, setShowsDeleteAccountConfirm] =
+    useState(false);
+  const [deleteAccountBusy, setDeleteAccountBusy] = useState(false);
   const [showsProfileEdit, setShowsProfileEdit] = useState(false);
   const [showsAvatarActions, setShowsAvatarActions] = useState(false);
   const [profileName, setProfileName] = useState(sessionUser.displayName);
@@ -449,10 +504,9 @@ function Dashboard({
   const [showsDirectInvitations, setShowsDirectInvitations] = useState(false);
   const [busyDirectInvitationID, setBusyDirectInvitationID] =
     useState<string>();
-  const [busyNearbyUserID, setBusyNearbyUserID] = useState<string>();
-  const [busyNearbyInvitationID, setBusyNearbyInvitationID] =
-    useState<string>();
   const inviteHandled = useRef(false);
+  const syncInFlight = useRef(false);
+  const signOutRef = useRef(onSignOut);
   const albumRequestID = useRef(0);
   const albumLoadInFlight = useRef<{
     userID: string;
@@ -462,13 +516,22 @@ function Dashboard({
   useEffect(() => {
     setUser(sessionUser);
     setProfileName(sessionUser.displayName);
+    if (hasRecoverableDrive(sessionUser.id)) setDriveMode(true);
   }, [sessionUser]);
+
+  useEffect(() => {
+    signOutRef.current = onSignOut;
+  }, [onSignOut]);
 
   useEffect(() => {
     albumRequestID.current += 1;
     albumLoadInFlight.current = null;
     setAlbums([]);
     setSelectedAlbumID("");
+    setAlbumHome(true);
+    setRecentAlbumPhotos([]);
+    setAlbumFolders([]);
+    setPendingSyncCount(0);
     setAlbumLoadStatus("loading");
     setAlbumLoadError("");
     setUsingCache(false);
@@ -496,18 +559,49 @@ function Dashboard({
   };
 
   const selectedAlbum = albums.find((album) => album.id === selectedAlbumID);
-  const canInviteNearby = Boolean(
-    selectedAlbum &&
-      canInviteToAlbum(
-        selectedAlbum.role,
-        selectedAlbum.members_can_invite,
-      ),
-  );
-  const nearby = useNearbyPeople({
-    user,
-    selectedAlbumID: selectedAlbum?.id,
-    canInvite: canInviteNearby,
-  });
+
+  useEffect(() => {
+    let active = true;
+    const loadSiteRole = async (showLoading: boolean) => {
+      if (showLoading) setSiteRoleReady(false);
+      try {
+        const context = await getSiteAdminContext();
+        if (active) setSiteAdminContext(context);
+      } catch (caught) {
+        const message =
+          caught instanceof Error ? caught.message : "unknown error";
+        console.error(
+          "Site role check failed:",
+          message,
+        );
+        if (active) setSiteAdminContext(null);
+        if (message.includes("利用を停止")) {
+          if (active) setToast("このアカウントは現在利用を停止されています。");
+          await signOutRef.current();
+        }
+      } finally {
+        if (active && showLoading) setSiteRoleReady(true);
+      }
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === "visible") {
+        void loadSiteRole(false);
+      }
+    };
+    void loadSiteRole(true);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    return () => {
+      active = false;
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+    };
+  }, [authRevision, sessionUser.id]);
+
+  const closeSiteAdmin = () => {
+    setShowsSiteAdmin(false);
+    if (window.location.pathname === "/site-admin") {
+      window.history.replaceState({}, "", "/");
+    }
+  };
   const refreshAlbums = useCallback(() => {
     const userID = sessionUser.id;
     if (!userID) return Promise.resolve();
@@ -523,14 +617,34 @@ function Dashboard({
       try {
         const result = await loadAlbums(userID);
         if (requestID !== albumRequestID.current) return;
-        setAlbums(result.data);
+        const offlineAlbumIDs = await getOfflineAlbumIDs(userID);
+        await restorePinnedOfflineMedia(userID);
+        const resolvedAlbums = result.data.map((album) => ({
+          ...album,
+          offline_enabled: offlineAlbumIDs.has(album.id),
+        }));
+        setAlbums(resolvedAlbums);
         setUsingCache(result.fromCache);
         setSelectedAlbumID((current) =>
-          result.data.some((album) => album.id === current)
+          resolvedAlbums.some((album) => album.id === current)
             ? current
-            : (result.data[0]?.id ?? ""),
+            : (resolvedAlbums[0]?.id ?? ""),
         );
         setAlbumLoadStatus("success");
+        const [recentResult, foldersResult] = await Promise.allSettled([
+          loadRecentAlbumPhotos(userID),
+          loadAlbumFolders(userID),
+        ]);
+        if (requestID !== albumRequestID.current) return;
+        if (recentResult.status === "fulfilled") {
+          setRecentAlbumPhotos(recentResult.value.data);
+          setUsingCache((current) =>
+            current || recentResult.value.fromCache,
+          );
+        }
+        if (foldersResult.status === "fulfilled") {
+          setAlbumFolders(foldersResult.value);
+        }
       } catch (error) {
         if (requestID !== albumRequestID.current) return;
         console.error("Album loading failed:", { userID, error });
@@ -575,7 +689,7 @@ function Dashboard({
 
     setLoading(true);
     try {
-      const result = await loadPhotos(selectedAlbumID);
+      const result = await loadPhotos(user.id, selectedAlbumID);
       setPhotos(result.data);
       setUsingCache(result.fromCache);
     } catch (error) {
@@ -583,7 +697,7 @@ function Dashboard({
     } finally {
       setLoading(false);
     }
-  }, [selectedAlbumID]);
+  }, [selectedAlbumID, user.id]);
 
   const refreshGlobalPhotos = useCallback(async (append = false) => {
     setGlobalLoading(true);
@@ -606,9 +720,45 @@ function Dashboard({
   }, [globalPhotos.length]);
 
   const openGlobalMemories = () => {
+    if (driveMode && driveRecording) {
+      setToast("走行記録を終了してから画面を移動してください。");
+      return;
+    }
+    setDriveMode(false);
+    setAlbumHome(false);
     setGlobalMode(true);
     if (globalPhotos.length === 0) void refreshGlobalPhotos();
   };
+
+  const runOfflineSync = useCallback(async () => {
+    if (!navigator.onLine || syncInFlight.current) return;
+    syncInFlight.current = true;
+    setSyncState("syncing");
+    try {
+      const result = await flushOfflineQueue(
+        user.id,
+        async (payload) => {
+          await uploadPhoto(payload);
+        },
+        (completed, total) => {
+          setToast(`${completed}／${total}件を同期中`);
+        },
+      );
+      setPendingSyncCount(result.pending);
+      setSyncState(result.failed > 0 ? "failed" : "idle");
+      if (result.completed > 0) {
+        await Promise.all([refreshAlbums(), refreshPhotos()]);
+        setToast(`${result.completed}件を同期しました。`);
+      } else if (result.failed > 0) {
+        setToast(`${result.failed}件の同期に失敗しました。`);
+      }
+    } catch {
+      setSyncState("failed");
+      setToast("同期に失敗しました。時間を空けて再試行してください。");
+    } finally {
+      syncInFlight.current = false;
+    }
+  }, [refreshAlbums, refreshPhotos, user.id]);
 
   useEffect(() => {
     void refreshAlbums();
@@ -621,6 +771,15 @@ function Dashboard({
   useEffect(() => {
     void refreshPhotos();
   }, [refreshPhotos]);
+
+  useEffect(() => {
+    void getOfflineStats(user.id).then((stats) => {
+      setPendingSyncCount(stats.pendingCount);
+      if (navigator.onLine && stats.pendingCount > 0) {
+        void runOfflineSync();
+      }
+    });
+  }, [runOfflineSync, user.id]);
 
   useEffect(() => {
     const query = new URLSearchParams(window.location.search);
@@ -658,11 +817,13 @@ function Dashboard({
       setOffline(false);
       void refreshAlbums();
       void refreshPhotos();
+      void runOfflineSync();
     };
     const offlineNow = () => setOffline(true);
     const visible = () => {
       if (document.visibilityState === "visible" && navigator.onLine) {
         void refreshAlbums();
+        void runOfflineSync();
       }
     };
     window.addEventListener("online", online);
@@ -673,7 +834,19 @@ function Dashboard({
       window.removeEventListener("offline", offlineNow);
       document.removeEventListener("visibilitychange", visible);
     };
-  }, [refreshAlbums, refreshPhotos]);
+  }, [refreshAlbums, refreshPhotos, runOfflineSync]);
+
+  useEffect(() => {
+    if (!("serviceWorker" in navigator)) return;
+    const syncRequested = (event: MessageEvent) => {
+      if (event.data?.type === "MAPALBUM_SYNC_REQUEST") {
+        void runOfflineSync();
+      }
+    };
+    navigator.serviceWorker.addEventListener("message", syncRequested);
+    return () =>
+      navigator.serviceWorker.removeEventListener("message", syncRequested);
+  }, [runOfflineSync]);
 
   useEffect(() => {
     if (!supabase || !selectedAlbumID || globalMode) return;
@@ -734,7 +907,9 @@ function Dashboard({
     });
   }, [photos, search]);
 
-  const canPost = canPostPhoto(selectedAlbum?.role);
+  const canPost =
+    albumLoadStatus === "success" &&
+    (!selectedAlbum || canPostPhoto(selectedAlbum.role));
   const canEdit = (photo: AlbumPhoto) =>
     globalMode
       ? photo.author_id === user.id
@@ -754,18 +929,99 @@ function Dashboard({
     setDetailPhotoID(group.photos[0]?.id);
   };
 
+  const openAlbum = (albumID: string, nextView: ViewMode = "photos") => {
+    setDriveMode(false);
+    setGlobalMode(false);
+    setAlbumHome(false);
+    setSelectedAlbumID(albumID);
+    setViewMode(nextView);
+    void saveAlbumPreference({
+      userID: user.id,
+      albumID,
+      viewedNow: true,
+    }).then(() => {
+      setAlbums((current) =>
+        current.map((album) =>
+          album.id === albumID
+            ? { ...album, last_viewed_at: new Date().toISOString() }
+            : album,
+        ),
+      );
+    });
+  };
+
+  const toggleFavoriteAlbum = async (album: Album) => {
+    const next = !album.is_favorite;
+    await saveAlbumPreference({
+      userID: user.id,
+      albumID: album.id,
+      isFavorite: next,
+    });
+    setAlbums((current) =>
+      current.map((candidate) =>
+        candidate.id === album.id
+          ? { ...candidate, is_favorite: next }
+          : candidate,
+      ),
+    );
+    setToast(next ? "お気に入りへ追加しました。" : "お気に入りを解除しました。");
+  };
+
+  const toggleOfflineAlbum = async (album: Album) => {
+    if (album.offline_enabled) {
+      await removeAlbumOffline(user.id, album.id);
+      setToast("端末内のオフライン保存を解除しました。");
+    } else {
+      const albumPhotos =
+        album.id === selectedAlbumID
+          ? photos
+          : (await loadPhotos(user.id, album.id)).data;
+      await cacheAlbumForOffline(
+        user.id,
+        album,
+        albumPhotos,
+        (completed, total) =>
+          setToast(`${completed}／${total}枚を保存中`),
+      );
+      setToast("アルバムをオフライン保存しました。");
+    }
+    await refreshAlbums();
+  };
+
+  const saveAlbumSettings = async (input: {
+    coverPhotoID: string | null;
+    visibility: "private" | "limited" | "public";
+    icon: string;
+    themeColor: string;
+    tags: string[];
+    folderID: string | null;
+  }) => {
+    if (!selectedAlbum) return;
+    if (selectedAlbum.role === "owner" || selectedAlbum.role === "admin") {
+      await updateAlbumPresentation({
+        albumID: selectedAlbum.id,
+        ...input,
+      });
+    }
+    await saveAlbumPreference({
+      userID: user.id,
+      albumID: selectedAlbum.id,
+      folderID: input.folderID,
+    });
+    await refreshAlbums();
+    setToast("アルバム設定を保存しました。");
+  };
+
   const savePhoto = async (values: {
     files?: File[];
     title: string;
     caption: string;
     category: PhotoCategory;
     capturedAt: string;
-    latitude: number;
-    longitude: number;
+    latitude: number | null;
+    longitude: number | null;
     visibility: "album_only" | "global";
   }, onProgress: (completed: number, total: number) => void) => {
-    if (!selectedAlbum) throw new Error("アルバムが選択されていません。");
-
     if (editingPhoto) {
       await updatePhoto(editingPhoto.id, {
         title: values.title,
@@ -776,7 +1032,7 @@ function Dashboard({
         longitude: values.longitude,
         visibility: values.visibility,
       });
-      await refreshPhotos();
+      if (editingPhoto.album_id) await refreshPhotos();
       if (globalMode || editingPhoto.visibility === "global" || values.visibility === "global") {
         await refreshGlobalPhotos();
       }
@@ -787,6 +1043,10 @@ function Dashboard({
 
     const files = values.files ?? [];
     if (files.length === 0) throw new Error("写真を選択してください。");
+    if (values.visibility === "album_only" && !selectedAlbum) {
+      throw new Error("投稿できるアルバムが選択されていません。");
+    }
+    const targetAlbumID = selectedAlbum?.id ?? null;
     console.info("[PhotoUpload] 画像枚数", files.length);
     const failures: PhotoUploadFailure[] = [];
     let succeeded = 0;
@@ -794,8 +1054,8 @@ function Dashboard({
       console.info("[PhotoUpload] 画像名", file.name);
       try {
         const metadata = await readPhotoMetadata(file);
-        await uploadPhoto({
-          albumID: selectedAlbum.id,
+        const payload = {
+          albumID: targetAlbumID,
           authorID: user.id,
           authorName: user.displayName,
           file,
@@ -806,7 +1066,14 @@ function Dashboard({
           latitude: metadata.latitude ?? values.latitude,
           longitude: metadata.longitude ?? values.longitude,
           visibility: values.visibility,
-        });
+          photoID: crypto.randomUUID(),
+        };
+        if (!navigator.onLine) {
+          await queueOfflinePhoto(user.id, payload);
+          setPendingSyncCount((current) => current + 1);
+        } else {
+          await uploadPhoto(payload);
+        }
         succeeded += 1;
       } catch (error) {
         const reason = !navigator.onLine
@@ -828,12 +1095,24 @@ function Dashboard({
       succeeded,
       failed: failures.length,
     });
-    await refreshPhotos();
-    await refreshAlbums();
-    if (values.visibility === "global" && globalMode) await refreshGlobalPhotos();
+    if (targetAlbumID) {
+      await refreshPhotos();
+      await refreshAlbums();
+    }
+    if (values.visibility === "global" && navigator.onLine) {
+      await refreshGlobalPhotos();
+      if (!driveRecording) {
+        setDriveMode(false);
+        setGlobalMode(true);
+      }
+    }
     setToast(
-      failures.length === 0
-        ? `${files.length}枚中 ${succeeded}枚保存成功`
+      !navigator.onLine && failures.length === 0
+        ? `${succeeded}件を同期待ちとして端末へ保存しました。`
+        : failures.length === 0 && values.visibility === "global"
+        ? "みんなへ投稿しました。"
+        : failures.length === 0
+          ? `${files.length}枚中 ${succeeded}枚保存成功`
         : `${files.length}枚中 ${succeeded}枚保存成功・${failures.length}枚失敗`,
     );
     return failures;
@@ -974,49 +1253,6 @@ function Dashboard({
     }
   };
 
-  const inviteNearbyUser = async (candidate: NearbyUser) => {
-    if (!selectedAlbum || !canInviteNearby) return;
-    setBusyNearbyUserID(candidate.id);
-    try {
-      await createNearbyInvitation(selectedAlbum.id, candidate.id);
-      setToast(`${candidate.displayName}さんへ招待を送りました`);
-    } catch (caught) {
-      setToast(
-        caught instanceof Error
-          ? caught.message
-          : "近くの人へ招待を送れませんでした。",
-      );
-    } finally {
-      setBusyNearbyUserID(undefined);
-    }
-  };
-
-  const respondNearbyInvitation = async (
-    invitation: NearbyInvitation,
-    accept: boolean,
-  ) => {
-    setBusyNearbyInvitationID(invitation.id);
-    try {
-      await respondToNearbyInvitation(invitation.id, accept);
-      await nearby.refreshIncomingInvitations();
-      if (accept) {
-        await refreshAlbums();
-        setSelectedAlbumID(invitation.albumId);
-        setToast("アルバムに参加しました");
-      } else {
-        setToast("招待を辞退しました");
-      }
-    } catch (caught) {
-      setToast(
-        caught instanceof Error
-          ? caught.message
-          : "近くの人からの招待を処理できませんでした。",
-      );
-    } finally {
-      setBusyNearbyInvitationID(undefined);
-    }
-  };
-
   const respondDirectInvitation = async (
     invitation: AlbumInvitation,
     accept: boolean,
@@ -1052,8 +1288,15 @@ function Dashboard({
 
   return (
     <div className="app-shell">
-      <header className="app-header">
-        <button className="brand-button" type="button" onClick={() => setShowsAlbumManager(true)}>
+      {!driveMode ? <header className="app-header">
+        <button
+          className="brand-button"
+          type="button"
+          onClick={() => {
+            setGlobalMode(false);
+            setAlbumHome(true);
+          }}
+        >
           <span className="brand-mark brand-mark--small">
             <MapIcon size={20} />
             <span>●</span>
@@ -1112,7 +1355,7 @@ function Dashboard({
             )}
           </button>
         </div>
-      </header>
+      </header> : null}
 
       {(offline || usingCache) && (
         <div className="offline-banner">
@@ -1122,9 +1365,40 @@ function Dashboard({
             : "一部のデータを端末キャッシュから表示しています。"}
         </div>
       )}
+      {!offline && (syncState !== "idle" || pendingSyncCount > 0) ? (
+        <div
+          className={
+            syncState === "failed"
+              ? "sync-status sync-status--failed"
+              : "sync-status"
+          }
+        >
+          <CloudCog size={15} />
+          <span>
+            {syncState === "syncing"
+              ? `${pendingSyncCount}件のデータを同期中`
+              : syncState === "failed"
+                ? `${pendingSyncCount}件の同期を再試行できます`
+                : `${pendingSyncCount}件の同期待ち`}
+          </span>
+          {syncState !== "syncing" ? (
+            <button type="button" onClick={() => void runOfflineSync()}>
+              再同期
+            </button>
+          ) : null}
+        </div>
+      ) : null}
 
       <main className="app-main">
-        {globalMode ? (
+        {driveMode ? (
+          <section className="drive-page-screen" aria-label="ドライブ">
+            <DriveLogPanel
+              userID={user.id}
+              onRecordingChange={setDriveRecording}
+              onNotice={setToast}
+            />
+          </section>
+        ) : globalMode ? (
           <>
             <section className="album-hero global-memories-hero">
               <div>
@@ -1166,6 +1440,45 @@ function Dashboard({
               )}
             </section>
           </>
+        ) : albumHome ? (
+          <AlbumHome
+            userID={user.id}
+            albums={albums}
+            recentPhotos={recentAlbumPhotos}
+            folders={albumFolders}
+            loading={albumLoadStatus === "loading"}
+            onOpen={openAlbum}
+            onOpenPhoto={(photo) => {
+              if (photo.album_id) openAlbum(photo.album_id);
+              openPhoto(photo);
+            }}
+            onOpenMap={() => {
+              if (selectedAlbumID) openAlbum(selectedAlbumID, "map");
+              else setToast("地図を表示するアルバムを選択してください。");
+            }}
+            onCreate={() => setShowsAlbumManager(true)}
+            onToggleFavorite={toggleFavoriteAlbum}
+            onToggleOffline={toggleOfflineAlbum}
+            onCreateFolder={async (name, color) => {
+              await createAlbumFolder(user.id, name, color);
+              setAlbumFolders(await loadAlbumFolders(user.id));
+              setToast("フォルダを追加しました。");
+            }}
+            onUpdateFolder={async (folderID, name, color) => {
+              await updateAlbumFolder({
+                folderID,
+                name,
+                themeColor: color,
+              });
+              await refreshAlbums();
+              setToast("フォルダを更新しました。");
+            }}
+            onDeleteFolder={async (folderID) => {
+              await deleteAlbumFolder(folderID);
+              await refreshAlbums();
+              setToast("フォルダを削除しました。アルバムは残っています。");
+            }}
+          />
         ) : albumLoadStatus === "loading" && albums.length === 0 ? (
           <div className="loading-state">
             <span />
@@ -1191,6 +1504,17 @@ function Dashboard({
                 <span className="eyebrow">みんなの思い出</span>
                 <h1>{selectedAlbum.name}</h1>
                 <p>{selectedAlbum.description || "写真と場所をみんなで残す共有アルバム"}</p>
+                <div className="album-hero__meta">
+                  <span>{selectedAlbum.owner_name || "オーナー"}</span>
+                  <span>{selectedAlbum.role}</span>
+                  <span>
+                    {selectedAlbum.visibility === "public"
+                      ? "公開"
+                      : selectedAlbum.visibility === "limited"
+                        ? "限定公開"
+                        : "非公開"}
+                  </span>
+                </div>
               </div>
               <div className="album-stats">
                 <span>
@@ -1202,6 +1526,59 @@ function Dashboard({
                   メンバー
                 </span>
               </div>
+              <div className="album-hero__actions" aria-label="アルバム操作">
+                <button
+                  type="button"
+                  className={selectedAlbum.is_favorite ? "is-active" : ""}
+                  onClick={() => void toggleFavoriteAlbum(selectedAlbum)}
+                >
+                  <Star size={17} fill={selectedAlbum.is_favorite ? "currentColor" : "none"} />
+                  お気に入り
+                </button>
+                <button
+                  type="button"
+                  className={selectedAlbum.offline_enabled ? "is-active" : ""}
+                  onClick={() => void toggleOfflineAlbum(selectedAlbum)}
+                >
+                  <CloudOff size={17} />
+                  {selectedAlbum.offline_enabled ? "保存済み" : "オフライン保存"}
+                </button>
+                <button type="button" onClick={() => setShowsMembers(true)}>
+                  <CircleUserRound size={17} />
+                  参加メンバー
+                </button>
+                {canInviteToAlbum(
+                  selectedAlbum.role,
+                  selectedAlbum.members_can_invite,
+                ) ? (
+                  <button type="button" onClick={() => void openShare()}>
+                    <UserPlus size={17} />
+                    共有・招待
+                  </button>
+                ) : null}
+                <button type="button" onClick={() => setShowsAlbumSettings(true)}>
+                  <Settings size={17} />
+                  アルバム設定
+                </button>
+                {canPost ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setEditingPhoto(undefined);
+                      setShowsPhotoEditor(true);
+                    }}
+                  >
+                    <Camera size={17} />
+                    写真を投稿
+                  </button>
+                ) : null}
+              </div>
+              <p className="album-hero__updated">
+                最終更新：
+                {new Date(
+                  selectedAlbum.updated_at ?? selectedAlbum.created_at,
+                ).toLocaleString("ja-JP")}
+              </p>
             </section>
 
             <section className="view-toolbar">
@@ -1248,7 +1625,11 @@ function Dashboard({
                   <p>思い出を読み込んでいます…</p>
                 </div>
               ) : viewMode === "map" ? (
-                <MapPanel photos={filteredPhotos} onSelect={openGroup} />
+                <MapPanel
+                  userID={user.id}
+                  photos={filteredPhotos}
+                  onSelect={openGroup}
+                />
               ) : (
                 <PhotoGrid photos={filteredPhotos} onSelect={openPhoto} />
               )}
@@ -1270,9 +1651,35 @@ function Dashboard({
       <nav className="bottom-nav" aria-label="メインメニュー">
         <button
           type="button"
-          className={!globalMode && viewMode === "map" ? "is-active" : ""}
+          className={!driveMode && !globalMode && albumHome ? "is-active" : ""}
           onClick={() => {
+            if (driveRecording) {
+              setToast("走行記録を終了してから画面を移動してください。");
+              return;
+            }
+            setDriveMode(false);
             setGlobalMode(false);
+            setAlbumHome(true);
+          }}
+        >
+          <Images />
+          <span>アルバム</span>
+        </button>
+        <button
+          type="button"
+          className={
+            !driveMode && !globalMode && !albumHome && viewMode === "map"
+              ? "is-active"
+              : ""
+          }
+          onClick={() => {
+            if (driveRecording) {
+              setToast("走行記録を終了してから画面を移動してください。");
+              return;
+            }
+            setDriveMode(false);
+            setGlobalMode(false);
+            setAlbumHome(false);
             setViewMode("map");
           }}
         >
@@ -1281,16 +1688,8 @@ function Dashboard({
         </button>
         <button
           type="button"
-          className={globalMode ? "is-active" : ""}
-          onClick={openGlobalMemories}
-        >
-          <Globe2 />
-          <span>みんな</span>
-        </button>
-        <button
-          type="button"
           className="camera-action"
-          disabled={!canPost || offline}
+          disabled={!canPost}
           onClick={() => {
             setEditingPhoto(undefined);
             setShowsPhotoEditor(true);
@@ -1299,11 +1698,24 @@ function Dashboard({
         >
           <Camera />
         </button>
-        <button type="button" onClick={() => setShowsAlbumManager(true)}>
-          <Images />
-          <span>アルバム</span>
+        <button
+          type="button"
+          className={!driveMode && globalMode ? "is-active" : ""}
+          onClick={openGlobalMemories}
+        >
+          <Globe2 />
+          <span>みんな</span>
         </button>
-        <button type="button" onClick={() => setShowsSettings(true)}>
+        <button
+          type="button"
+          onClick={() => {
+            if (driveRecording) {
+              setToast("走行記録を終了してから設定を開いてください。");
+              return;
+            }
+            setShowsSettings(true);
+          }}
+        >
           <Settings />
           <span>設定</span>
         </button>
@@ -1316,8 +1728,7 @@ function Dashboard({
           selectedAlbumID={selectedAlbumID}
           onClose={() => setShowsAlbumManager(false)}
           onSelect={(albumID) => {
-            setGlobalMode(false);
-            setSelectedAlbumID(albumID);
+            openAlbum(albumID);
           }}
           onCreate={addAlbum}
           onJoin={enterAlbum}
@@ -1328,6 +1739,14 @@ function Dashboard({
       {showsPhotoEditor ? (
         <PhotoEditor
           photo={editingPhoto}
+          hasAlbum={
+            editingPhoto
+              ? Boolean(editingPhoto.album_id)
+              : Boolean(selectedAlbum)
+          }
+          initialVisibility={
+            globalMode || !selectedAlbum ? "global" : "album_only"
+          }
           onClose={() => {
             setShowsPhotoEditor(false);
             setEditingPhoto(undefined);
@@ -1380,6 +1799,29 @@ function Dashboard({
           currentUser={user}
           onClose={() => setShowsMembers(false)}
           onChanged={refreshAlbums}
+        />
+      ) : null}
+
+      {showsAlbumSettings && selectedAlbum ? (
+        <AlbumSettingsPanel
+          album={selectedAlbum}
+          photos={photos}
+          folders={albumFolders}
+          onClose={() => setShowsAlbumSettings(false)}
+          onSave={saveAlbumSettings}
+        />
+      ) : null}
+
+      {showsOfflineCache ? (
+        <OfflineCachePanel
+          loadStats={() => getOfflineStats(user.id)}
+          onSync={runOfflineSync}
+          onClear={async () => {
+            await clearOfflineCache(user.id);
+            await refreshAlbums();
+            setToast("端末内のオフラインキャッシュを削除しました。");
+          }}
+          onClose={() => setShowsOfflineCache(false)}
         />
       ) : null}
 
@@ -1499,33 +1941,55 @@ function Dashboard({
               </span>
               <span className={dark ? "toggle is-on" : "toggle"} />
             </button>
-            <div className="settings-row settings-row--static">
+            <button
+              type="button"
+              className="settings-row"
+              onClick={() => {
+                setShowsSettings(false);
+                setShowsOfflineCache(true);
+              }}
+            >
               {offline ? <CloudOff size={19} /> : <Wifi size={19} />}
               <span>
-                <strong>オフライン閲覧</strong>
-                <small>一度表示した地図と写真を自動保存</small>
+                <strong>オフライン・キャッシュ管理</strong>
+                <small>保存容量、同期待ち、保存済みアルバムを管理</small>
               </span>
-            </div>
-            <NearbyPeopleSettings
-              enabled={nearby.enabled}
-              status={nearby.status}
-              error={nearby.error}
-              album={selectedAlbum}
-              canInvite={canInviteNearby}
-              nearbyUsers={nearby.nearbyUsers}
-              incomingInvitations={nearby.incomingInvitations}
-              busyUserID={busyNearbyUserID}
-              busyInvitationID={busyNearbyInvitationID}
-              onToggle={nearby.setNearbyEnabled}
-              onInvite={(candidate) => void inviteNearbyUser(candidate)}
-              onRespond={(invitation, accept) =>
-                void respondNearbyInvitation(invitation, accept)
-              }
-              onOpenStandardInvite={() => {
+              <ChevronDown size={17} className="settings-row__chevron" />
+            </button>
+            <button
+              type="button"
+              className="settings-row"
+              onClick={() => {
                 setShowsSettings(false);
-                void openShare();
+                setGlobalMode(false);
+                setDriveMode(true);
               }}
-            />
+            >
+              <CarFront size={19} />
+              <span>
+                <strong>ドライブ設定・走行記録</strong>
+                <small>目的地検索・ナビ・走行記録</small>
+              </span>
+              <ChevronDown size={17} className="settings-row__chevron" />
+            </button>
+            {siteAdminContext?.role === "site_admin" ? (
+              <button
+                type="button"
+                className="settings-row"
+                onClick={() => {
+                  setShowsSettings(false);
+                  setShowsSiteAdmin(true);
+                  window.history.pushState({}, "", "/site-admin");
+                }}
+              >
+                <ShieldCheck size={19} />
+                <span>
+                  <strong>サイト管理</strong>
+                  <small>ユーザー権限とアカウント状態を管理</small>
+                </span>
+                <ChevronDown size={17} className="settings-row__chevron" />
+              </button>
+            ) : null}
             <AccountInfoMenu onNavigate={openAccountPage} />
             <div className="install-note">
               <CircleUserRound size={20} />
@@ -1534,6 +1998,20 @@ function Dashboard({
                 アプリのように起動できます。
               </p>
             </div>
+            <button
+              className="settings-row settings-row--danger"
+              type="button"
+              onClick={() => {
+                setShowsSettings(false);
+                setShowsDeleteAccountConfirm(true);
+              }}
+            >
+              <UserRoundX size={19} />
+              <span>
+                <strong>アカウント削除</strong>
+                <small>本人データとログイン情報を削除</small>
+              </span>
+            </button>
             <button
               className="danger-button danger-button--wide"
               type="button"
@@ -1547,6 +2025,23 @@ function Dashboard({
             </button>
           </div>
         </Modal>
+      ) : null}
+
+      {showsSiteAdmin && siteRoleReady ? (
+        siteAdminContext?.role === "site_admin" ? (
+          <Modal title="サイト管理" size="wide" onClose={closeSiteAdmin}>
+            <SiteAdminPanel
+              context={siteAdminContext}
+              onNotice={setToast}
+            />
+          </Modal>
+        ) : (
+          <Modal title="サイト管理" onClose={closeSiteAdmin}>
+            <p className="site-admin-denied" role="alert">
+              この画面を表示する権限がありません。
+            </p>
+          </Modal>
+        )
       ) : null}
 
       {accountPage ? (
@@ -1589,7 +2084,6 @@ function Dashboard({
                   setLogoutBusy(true);
                   void (async () => {
                     try {
-                      await nearby.stopPresence().catch(() => undefined);
                       await onSignOut();
                     } catch (error) {
                       console.error("Sign out failed:", error);
@@ -1607,6 +2101,71 @@ function Dashboard({
           <p className="logout-confirm-message">
             現在のアカウントからログアウトします。よろしいですか？
           </p>
+        </Modal>
+      ) : null}
+
+      {showsDeleteAccountConfirm ? (
+        <Modal
+          title="本当にアカウントを削除しますか？"
+          onClose={() => {
+            if (!deleteAccountBusy) {
+              setShowsDeleteAccountConfirm(false);
+              setShowsSettings(true);
+            }
+          }}
+          footer={
+            <div className="logout-confirm-actions">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={deleteAccountBusy}
+                onClick={() => {
+                  setShowsDeleteAccountConfirm(false);
+                  setShowsSettings(true);
+                }}
+              >
+                キャンセル
+              </button>
+              <button
+                className="danger-button"
+                type="button"
+                disabled={deleteAccountBusy}
+                onClick={() => {
+                  setDeleteAccountBusy(true);
+                  void (async () => {
+                    try {
+                      await deleteOwnAccount();
+                      await onAccountDeleted();
+                    } catch (caught) {
+                      console.error("Account deletion failed:", caught);
+                      setToast(
+                        caught instanceof Error
+                          ? caught.message
+                          : "アカウントを削除できませんでした。",
+                      );
+                      setDeleteAccountBusy(false);
+                    }
+                  })();
+                }}
+              >
+                {deleteAccountBusy ? "削除中…" : "削除する"}
+              </button>
+            </div>
+          }
+        >
+          <div className="account-delete-confirm">
+            <p>次の本人データは削除後に元へ戻せません。</p>
+            <ul>
+              <li>プロフィール</li>
+              <li>写真</li>
+              <li>走行記録</li>
+              <li>アルバム参加情報</li>
+              <li>その他本人データ</li>
+            </ul>
+            <p>
+              他のメンバーが参加している所有アルバムは、他ユーザーのデータを残すため安全に引き継がれます。
+            </p>
+          </div>
         </Modal>
       ) : null}
 
