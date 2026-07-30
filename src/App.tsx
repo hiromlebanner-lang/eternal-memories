@@ -1651,22 +1651,6 @@ function Dashboard({
       <nav className="bottom-nav" aria-label="メインメニュー">
         <button
           type="button"
-          className={!driveMode && !globalMode && albumHome ? "is-active" : ""}
-          onClick={() => {
-            if (driveRecording) {
-              setToast("走行記録を終了してから画面を移動してください。");
-              return;
-            }
-            setDriveMode(false);
-            setGlobalMode(false);
-            setAlbumHome(true);
-          }}
-        >
-          <Images />
-          <span>アルバム</span>
-        </button>
-        <button
-          type="button"
           className={
             !driveMode && !globalMode && !albumHome && viewMode === "map"
               ? "is-active"
@@ -1688,6 +1672,14 @@ function Dashboard({
         </button>
         <button
           type="button"
+          className={!driveMode && globalMode ? "is-active" : ""}
+          onClick={openGlobalMemories}
+        >
+          <Globe2 />
+          <span>みんな</span>
+        </button>
+        <button
+          type="button"
           className="camera-action"
           disabled={!canPost}
           onClick={() => {
@@ -1700,11 +1692,19 @@ function Dashboard({
         </button>
         <button
           type="button"
-          className={!driveMode && globalMode ? "is-active" : ""}
-          onClick={openGlobalMemories}
+          className={!driveMode && !globalMode && albumHome ? "is-active" : ""}
+          onClick={() => {
+            if (driveRecording) {
+              setToast("走行記録を終了してから画面を移動してください。");
+              return;
+            }
+            setDriveMode(false);
+            setGlobalMode(false);
+            setAlbumHome(true);
+          }}
         >
-          <Globe2 />
-          <span>みんな</span>
+          <Images />
+          <span>アルバム</span>
         </button>
         <button
           type="button"
@@ -1967,7 +1967,7 @@ function Dashboard({
             >
               <CarFront size={19} />
               <span>
-                <strong>ドライブ設定・走行記録</strong>
+                <strong>ドライブ・走行記録</strong>
                 <small>目的地検索・ナビ・走行記録</small>
               </span>
               <ChevronDown size={17} className="settings-row__chevron" />

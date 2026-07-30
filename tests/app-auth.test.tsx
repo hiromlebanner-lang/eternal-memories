@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -275,6 +275,43 @@ describe("Supabase Auth連携", () => {
     await user.click(screen.getByRole("button", { name: "ログアウト" }));
     await waitFor(() => expect(auth.signOut).toHaveBeenCalled());
     expect(data.clearPrivateOfflineData).toHaveBeenCalled();
+  });
+
+  it("下部ナビから専用アルバム一覧へ移動できる", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    await screen.findByText("Eternal memoriesにログイン");
+    await act(async () => {
+      state.authCallback?.("SIGNED_IN", {
+        user: {
+          id: "user-1",
+          email: "hana@example.com",
+          user_metadata: { display_name: "はなこ" },
+        },
+      });
+    });
+
+    await screen.findByText("アルバムはまだありません。");
+    const navigation = screen.getByRole("navigation", {
+      name: "メインメニュー",
+    });
+    const buttons = within(navigation).getAllByRole("button");
+
+    expect(buttons[0]).toHaveAccessibleName("地図");
+    expect(buttons[1]).toHaveAccessibleName("みんな");
+    expect(buttons[2]).toHaveAccessibleName("写真を追加");
+    expect(buttons[3]).toHaveAccessibleName("アルバム");
+    expect(buttons[4]).toHaveAccessibleName("設定");
+    expect(buttons[3]).toHaveClass("is-active");
+
+    await user.click(buttons[0]);
+    expect(buttons[0]).toHaveClass("is-active");
+    await user.click(buttons[3]);
+
+    expect(buttons[3]).toHaveClass("is-active");
+    expect(
+      screen.getByRole("heading", { name: "専用アルバム" }),
+    ).toBeVisible();
   });
 
 });
