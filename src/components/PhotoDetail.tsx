@@ -9,7 +9,14 @@ import {
   Trash2,
   UserRound,
 } from "lucide-react";
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import {
+  canSharePhoto,
+  savePreparedPhotoAsFile,
+  savePhotoToDevice,
+  type PhotoSaveProgress,
+  type PhotoSaveResult,
+} from "../lib/photoSave";
 import type { AlbumPhoto } from "../types";
 import { CATEGORY_META } from "../types";
 import { Modal } from "./Modal";
@@ -25,9 +32,16 @@ interface PhotoDetailProps {
   onEdit: (photo: AlbumPhoto) => void;
   onDelete: (photo: AlbumPhoto) => Promise<void>;
   onDownload?: (
-    photoID: string,
-  ) => Promise<"shared" | "downloaded" | "cancelled">;
+    photo: AlbumPhoto,
+    onProgress?: (progress: PhotoSaveProgress) => void,
+  ) => Promise<PhotoSaveResult>;
 }
+
+const SAVE_PROGRESS_LABEL: Record<PhotoSaveProgress, string> = {
+  preparing: "画像を準備しています…",
+  generating: "保存用画像を作成しています…",
+  sharing: "共有画面を開きます…",
+};
 
 export function PhotoDetail({
   photos,
@@ -48,11 +62,22 @@ export function PhotoDetail({
   const [deleting, setDeleting] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const [downloadMessage, setDownloadMessage] = useState("");
+  const [manualSave, setManualSave] = useState<{
+    file: File;
+    previewURL: string;
+  } | null>(null);
+  const [showsSaveHelp, setShowsSaveHelp] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const downloadingRef = useRef(false);
 
   const resolvedIndex = Math.min(index, Math.max(0, photos.length - 1));
   const photo = photos[resolvedIndex];
+  useEffect(
+    () => () => {
+      if (manualSave?.previewURL) URL.revokeObjectURL(manualSave.previewURL);
+    },
+    [manualSave],
+  );
   if (!photo) return null;
   const meta = CATEGORY_META[photo.category];
 
@@ -73,18 +98,30 @@ export function PhotoDetail({
     setDownloading(true);
     setDownloadMessage("");
     try {
-      const result = await onDownload(photo.id);
-      setDownloadMessage(
-        result === "shared"
-          ? "保存・共有メニューを開きました"
-          : result === "downloaded"
-            ? "画像を保存しました"
-            : "",
-      );
+      const result = await onDownload(photo, (progress) => {
+        setDownloadMessage(SAVE_PROGRESS_LABEL[progress]);
+      });
+      if (result.status === "shared") {
+        setDownloadMessage(
+          "共有画面を開きました。「画像を保存」を選択してください。",
+        );
+      } else if (result.status === "cancelled") {
+        setDownloadMessage("保存操作がキャンセルされました。");
+      } else {
+        setManualSave({
+          file: result.file,
+          previewURL: URL.createObjectURL(result.file),
+        });
+        setDownloadMessage(
+          "この端末ではファイル共有を利用できません。画像を長押しして保存してください。",
+        );
+      }
     } catch (error) {
-      console.error("[PhotoDownload] 画像の保存に失敗しました", error);
+      const message = error instanceof Error ? error.message : "";
       setDownloadMessage(
-        "画像を保存・共有できませんでした。もう一度お試しください",
+        /[\u3000-\u9fff\u3040-\u30ff]/.test(message)
+          ? message
+          : "写真を保存できませんでした。通信状態を確認して、もう一度お試しください。",
       );
     } finally {
       downloadingRef.current = false;
@@ -216,7 +253,7 @@ export function PhotoDetail({
                   onClick={() => void download()}
                 >
                   <Share2 size={17} />
-                  {downloading ? "準備中…" : "保存・共有"}
+                  {downloading ? "画像を準備中…" : "写真アプリに保存"}
                 </button>
               ) : null}
               {canEdit(photo) ? (
@@ -278,6 +315,75 @@ export function PhotoDetail({
         }
       >
         <p>この操作は元に戻せません。</p>
+      </Modal>
+    ) : null}
+    {manualSave ? (
+      <Modal
+        title="写真アプリに保存"
+        size="wide"
+        onClose={() => setManualSave(null)}
+        footer={
+          <div className="manual-photo-save__actions">
+            {canSharePhoto(manualSave.file) ? (
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => {
+                  void savePhotoToDevice(manualSave.file, (progress) => {
+                    setDownloadMessage(SAVE_PROGRESS_LABEL[progress]);
+                  }).then((result) => {
+                    if (result.status === "shared") {
+                      setManualSave(null);
+                      setDownloadMessage(
+                        "共有画面を開きました。「画像を保存」を選択してください。",
+                      );
+                    } else if (result.status === "cancelled") {
+                      setDownloadMessage("保存操作がキャンセルされました。");
+                    }
+                  });
+                }}
+              >
+                <Share2 size={17} />
+                共有画面を開く
+              </button>
+            ) : null}
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => setShowsSaveHelp((current) => !current)}
+            >
+              保存方法を見る
+            </button>
+            <button
+              className="text-button"
+              type="button"
+              onClick={() => {
+                savePreparedPhotoAsFile(manualSave.file);
+                setDownloadMessage(
+                  "ファイル保存を開始しました。写真アプリへの保存状況は端末でご確認ください。",
+                );
+              }}
+            >
+              ファイルとして保存
+            </button>
+          </div>
+        }
+      >
+        <div className="manual-photo-save">
+          <p>画像を長押しして「写真に保存」を選択してください。</p>
+          {showsSaveHelp ? (
+            <ol>
+              <li>下の画像を長押しします。</li>
+              <li>表示されたメニューから「写真に保存」を選びます。</li>
+              <li>選択肢がない場合は「ファイルとして保存」をご利用ください。</li>
+            </ol>
+          ) : null}
+          <img
+            src={manualSave.previewURL}
+            alt="写真アプリへ保存する画像"
+            draggable
+          />
+        </div>
       </Modal>
     ) : null}
     </>

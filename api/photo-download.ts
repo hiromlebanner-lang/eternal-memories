@@ -9,6 +9,7 @@ interface ApiRequest extends IncomingMessage {
 type PhotoRow = {
   album_id: string;
   storage_path: string;
+  captured_at: string;
 };
 
 function sendJSON(response: ServerResponse, status: number, message: string) {
@@ -45,13 +46,14 @@ function isPhotoRequest(value: unknown): value is { photoId: string } {
   );
 }
 
-function outputFileName(extension: string) {
-  const stamp = new Date()
-    .toISOString()
-    .replace(/[-:]/g, "")
-    .replace("T", "_")
-    .slice(0, 15);
-  return `eternal-memories_${stamp}.${extension}`;
+function outputFileName(extension: string, capturedAt: string) {
+  const date = new Date(capturedAt);
+  const safeDate = Number.isNaN(date.getTime()) ? new Date() : date;
+  const stamp = safeDate
+    .toLocaleString("sv-SE", { timeZone: "Asia/Tokyo", hour12: false })
+    .replace(" ", "_")
+    .replaceAll(":", "");
+  return `Eternal-memories_${stamp}.${extension}`;
 }
 
 export async function addWatermark(input: Buffer) {
@@ -169,7 +171,7 @@ export default async function handler(
 
     const { data: photo, error: photoError } = await client
       .from("photos")
-      .select("album_id, storage_path")
+      .select("album_id, storage_path, captured_at")
       .eq("id", body.photoId)
       .maybeSingle<PhotoRow>();
     if (photoError) throw photoError;
@@ -209,7 +211,7 @@ export default async function handler(
     response.setHeader("Content-Type", result.contentType);
     response.setHeader(
       "Content-Disposition",
-      `attachment; filename="${outputFileName(result.extension)}"`,
+      `attachment; filename="${outputFileName(result.extension, photo.captured_at)}"`,
     );
     response.setHeader("Cache-Control", "private, no-store");
     response.setHeader("X-Content-Type-Options", "nosniff");

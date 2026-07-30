@@ -1929,6 +1929,47 @@ img {
   text-align: center;
 }
 
+.manual-photo-save {
+  display: grid;
+  gap: 14px;
+  text-align: center;
+}
+
+.manual-photo-save p {
+  margin: 0;
+  font-weight: 750;
+}
+
+.manual-photo-save ol {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 12px 12px 12px 34px;
+  border-radius: 14px;
+  color: var(--text-secondary);
+  background: var(--surface-muted);
+  font-size: 12px;
+  text-align: left;
+}
+
+.manual-photo-save img {
+  width: 100%;
+  max-height: min(62dvh, 680px);
+  border-radius: 16px;
+  object-fit: contain;
+  touch-action: manipulation;
+  -webkit-user-select: auto;
+  user-select: auto;
+  -webkit-touch-callout: default;
+}
+
+.manual-photo-save__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* Photo editor */
 
 .photo-editor {

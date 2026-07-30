@@ -11,6 +11,14 @@ import type {
 } from "../types";
 import { compressPhoto } from "./image";
 import { formatErrorMessage, toAppError } from "./errors";
+import {
+  addClientWatermark,
+  isSupportedPhotoBlob,
+  photoFileName,
+  savePhotoToDevice,
+  type PhotoSaveProgress,
+  type PhotoSaveResult,
+} from "./photoSave";
 import { supabase } from "./supabase";
 
 type LoadResult<T> = {
@@ -597,7 +605,35 @@ export async function loadGlobalPhotos(offset = 0, limit = 24) {
   return { photos, hasMore: rows.length === limit };
 }
 
-export async function downloadAlbumPhoto(photoID: string) {
+export async function downloadAlbumPhoto(
+  photo: AlbumPhoto,
+  onProgress?: (progress: PhotoSaveProgress) => void,
+): Promise<PhotoSaveResult> {
+  onProgress?.("preparing");
+  if (!navigator.onLine) {
+    if (!("caches" in window)) {
+      throw new Error(
+        "この写真はオフライン保存されていません。通信復帰後にお試しください。",
+      );
+    }
+    const cached = await caches.match(photo.image_url);
+    if (!cached?.ok) {
+      throw new Error(
+        "この写真はオフライン保存されていません。通信復帰後にお試しください。",
+      );
+    }
+    const cachedBlob = await cached.blob();
+    if (!isSupportedPhotoBlob(cachedBlob)) {
+      throw new Error("高画質の写真はオフライン保存されていません。");
+    }
+    onProgress?.("generating");
+    const offlineFile = await addClientWatermark(
+      cachedBlob,
+      photo.captured_at,
+    );
+    return savePhotoToDevice(offlineFile, onProgress);
+  }
+
   const client = requireSupabase();
   const {
     data: { session },
@@ -613,52 +649,41 @@ export async function downloadAlbumPhoto(photoID: string) {
       Authorization: `Bearer ${session.access_token}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ photoId: photoID }),
+    body: JSON.stringify({ photoId: photo.id }),
   });
   if (!response.ok) {
-    throw new Error(`Photo download failed: ${response.status}`);
+    const body = (await response.json().catch(() => null)) as {
+      message?: string;
+    } | null;
+    if (response.status === 401) {
+      throw new Error("ログイン状態を確認できませんでした。");
+    }
+    if (response.status === 403) {
+      throw new Error("この写真を保存する権限がありません。");
+    }
+    throw new Error(
+      body?.message ??
+        "写真を保存できませんでした。通信状態を確認して、もう一度お試しください。",
+    );
   }
 
+  onProgress?.("generating");
   const blob = await response.blob();
+  const contentType =
+    blob.type || response.headers.get("Content-Type") || "image/jpeg";
+  const normalizedBlob =
+    blob.type === contentType ? blob : blob.slice(0, blob.size, contentType);
+  if (!isSupportedPhotoBlob(normalizedBlob)) {
+    throw new Error("保存用画像を正しく取得できませんでした。");
+  }
   const disposition = response.headers.get("Content-Disposition") ?? "";
   const fileName =
     disposition.match(/filename="([^"]+)"/i)?.[1] ??
-    `eternal-memories_${new Date().toISOString().slice(0, 10).replaceAll("-", "")}.jpg`;
-  const file = new File([blob], fileName, {
-    type: blob.type || response.headers.get("Content-Type") || "image/jpeg",
+    photoFileName(photo.captured_at, normalizedBlob.type);
+  const file = new File([normalizedBlob], fileName, {
+    type: normalizedBlob.type,
   });
-  const shareData: ShareData = {
-    files: [file],
-    title: "Eternal memories",
-    text: "Eternal memoriesの写真",
-  };
-  const canShareFile =
-    typeof navigator.share === "function" &&
-    (typeof navigator.canShare !== "function" ||
-      navigator.canShare(shareData));
-
-  if (canShareFile) {
-    try {
-      await navigator.share(shareData);
-      return "shared" as const;
-    } catch (error) {
-      if (error instanceof DOMException && error.name === "AbortError") {
-        return "cancelled" as const;
-      }
-      console.warn("[PhotoDownload] 共有メニューを開けないためダウンロードします", error);
-    }
-  }
-
-  const objectURL = URL.createObjectURL(blob);
-  const anchor = document.createElement("a");
-  anchor.href = objectURL;
-  anchor.download = fileName;
-  anchor.rel = "noopener";
-  document.body.append(anchor);
-  anchor.click();
-  anchor.remove();
-  window.setTimeout(() => URL.revokeObjectURL(objectURL), 1_000);
-  return "downloaded" as const;
+  return savePhotoToDevice(file, onProgress);
 }
 
 export async function createAlbum(name: string, description: string) {
