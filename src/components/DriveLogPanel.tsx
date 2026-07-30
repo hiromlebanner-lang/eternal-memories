@@ -47,6 +47,7 @@ import {
   calculateDriveDistance,
   shouldStoreDrivePoint,
 } from "../lib/driveRoute";
+import { getNearbyLocationZoom } from "../lib/location";
 import {
   distanceToPlannedRoute,
   fetchDrivingRoute,
@@ -185,6 +186,27 @@ function locationMessage(error: GeolocationPositionError) {
     : "現在地を取得できませんでした。通信環境と位置情報設定をご確認ください。";
 }
 
+function readLastMapView(userID: string) {
+  try {
+    const saved = JSON.parse(
+      localStorage.getItem(`mapalbum:last-map:${userID}`) ?? "null",
+    ) as { latitude?: unknown; longitude?: unknown; zoom?: unknown } | null;
+    if (
+      saved &&
+      typeof saved.latitude === "number" &&
+      typeof saved.longitude === "number"
+    ) {
+      return {
+        center: [saved.latitude, saved.longitude] as [number, number],
+        zoom: typeof saved.zoom === "number" ? saved.zoom : 15,
+      };
+    }
+  } catch {
+    // 保存値が壊れている場合は日本全体の安全な初期表示へ戻す。
+  }
+  return { center: [36.3, 138.2] as [number, number], zoom: 5 };
+}
+
 function FitRoute({ coordinates }: { coordinates: DriveCoordinate[] }) {
   const map = useMap();
   useEffect(() => {
@@ -227,6 +249,56 @@ function DetectManualMapMove({ onManualMove }: { onManualMove: () => void }) {
   return null;
 }
 
+function DriveMapController({
+  userID,
+  current,
+  focusRequest,
+}: {
+  userID: string;
+  current: DriveRoutePoint | null;
+  focusRequest: number;
+}) {
+  const map = useMap();
+  const initialCentered = useRef(false);
+  const lastFocusRequest = useRef(focusRequest);
+
+  useMapEvents({
+    moveend() {
+      const center = map.getCenter();
+      localStorage.setItem(
+        `mapalbum:last-map:${userID}`,
+        JSON.stringify({
+          latitude: center.lat,
+          longitude: center.lng,
+          zoom: map.getZoom(),
+        }),
+      );
+    },
+  });
+
+  useEffect(() => {
+    window.setTimeout(() => map.invalidateSize(), 60);
+  }, [map]);
+
+  useEffect(() => {
+    if (!current) return;
+    if (
+      !initialCentered.current ||
+      focusRequest !== lastFocusRequest.current
+    ) {
+      map.setView(
+        [current.latitude, current.longitude],
+        getNearbyLocationZoom(current.accuracy, window.innerWidth),
+        { animate: initialCentered.current },
+      );
+      initialCentered.current = true;
+      lastFocusRequest.current = focusRequest;
+    }
+  }, [current, focusRequest, map]);
+
+  return null;
+}
+
 const startIcon = L.divIcon({
   className: "drive-marker",
   html: "<span>出</span>",
@@ -247,22 +319,27 @@ const photoIcon = L.divIcon({
 });
 
 function RouteMap({
+  userID,
   points,
   photos = [],
   plannedRoute = [],
   current = null,
   destination = null,
   followCurrent = false,
+  focusRequest = 0,
   onManualMove,
 }: {
+  userID: string;
   points: DriveRoutePoint[];
   photos?: AlbumPhoto[];
   plannedRoute?: DriveCoordinate[];
   current?: DriveRoutePoint | null;
   destination?: DriveDestination | null;
   followCurrent?: boolean;
+  focusRequest?: number;
   onManualMove?: () => void;
 }) {
+  const fallbackView = useMemo(() => readLastMapView(userID), [userID]);
   const positions = points.map(
     (point) => [point.latitude, point.longitude] as [number, number],
   );
@@ -271,7 +348,7 @@ function RouteMap({
   );
   const center = current
     ? ([current.latitude, current.longitude] as [number, number])
-    : positions[0] ?? plannedPositions[0] ?? ([36.3, 138.2] as [number, number]);
+    : positions[0] ?? plannedPositions[0] ?? fallbackView.center;
   const fitCoordinates =
     plannedRoute.length > 0
       ? plannedRoute
@@ -291,7 +368,11 @@ function RouteMap({
     <div className="drive-map">
       <MapContainer
         center={center}
-        zoom={current ? 15 : 5}
+        zoom={
+          current
+            ? getNearbyLocationZoom(current.accuracy, window.innerWidth)
+            : fallbackView.zoom
+        }
         attributionControl={false}
         className="drive-map__canvas"
       >
@@ -307,6 +388,11 @@ function RouteMap({
           <FitRoute coordinates={fitCoordinates} />
         ) : null}
         <FollowCurrent current={current} enabled={followCurrent} />
+        <DriveMapController
+          userID={userID}
+          current={current}
+          focusRequest={focusRequest}
+        />
         {onManualMove ? (
           <DetectManualMapMove onManualMove={onManualMove} />
         ) : null}
@@ -411,6 +497,8 @@ export function DriveLogPanel({
     Boolean(recovered?.destination),
   );
   const [followCurrent, setFollowCurrent] = useState(true);
+  const [currentFocusRequest, setCurrentFocusRequest] = useState(0);
+  const [showLocationHelp, setShowLocationHelp] = useState(false);
   const [arrivalPrompt, setArrivalPrompt] = useState(false);
   const [wakeLockStatus, setWakeLockStatus] =
     useState<WakeLockStatus>("idle");
@@ -673,6 +761,7 @@ export function DriveLogPanel({
     if (position.coords.accuracy <= 200) {
       setCurrentPosition(livePoint);
       setLocationStatus("ready");
+      setShowLocationHelp(false);
     }
     if (position.coords.accuracy > MAX_ACCURACY_METERS) return;
     setDraft((current) => {
@@ -1015,6 +1104,7 @@ export function DriveLogPanel({
           ← 一覧へ戻る
         </button>
         <RouteMap
+          userID={userID}
           points={selectedPoints}
           photos={selectedPhotos}
           plannedRoute={selectedLog.planned_route ?? []}
@@ -1049,6 +1139,23 @@ export function DriveLogPanel({
     <div className="drive-panel">
       {pageHeader}
       {error ? <p className="drive-message drive-message--error">{error}</p> : null}
+      {locationStatus === "error" ? (
+        <div className="drive-location-guidance">
+          <button
+            className="text-button"
+            type="button"
+            onClick={() => setShowLocationHelp((current) => !current)}
+          >
+            位置情報の設定方法
+          </button>
+          {showLocationHelp ? (
+            <p>
+              iPhoneは「設定」→「プライバシーとセキュリティ」→「位置情報サービス」から、
+              Androidは「設定」→「位置情報」から、このブラウザの位置情報を許可してください。
+            </p>
+          ) : null}
+        </div>
+      ) : null}
       {interruptionWarning || draft?.interrupted ? (
         <p className="drive-message drive-message--warning">
           <AlertTriangle size={17} />
@@ -1129,17 +1236,22 @@ export function DriveLogPanel({
         <section className="drive-recording">
           <div className="drive-recording__status"><span /><strong>走行記録中</strong></div>
           <RouteMap
+            userID={userID}
             points={draft.points}
             plannedRoute={plannedRoute?.coordinates ?? []}
             current={currentPosition}
             destination={destination}
             followCurrent={followCurrent}
+            focusRequest={currentFocusRequest}
             onManualMove={() => setFollowCurrent(false)}
           />
           <button
             className="drive-follow-button"
             type="button"
-            onClick={() => setFollowCurrent(true)}
+            onClick={() => {
+              setFollowCurrent(true);
+              setCurrentFocusRequest((current) => current + 1);
+            }}
           >
             <Crosshair size={17} /> 現在地へ戻る
           </button>
@@ -1204,6 +1316,7 @@ export function DriveLogPanel({
       ) : state === "review" && draft ? (
         <section className="drive-review">
           <RouteMap
+            userID={userID}
             points={draft.points}
             plannedRoute={draft.plannedRoute?.coordinates ?? []}
             destination={draft.destination}
@@ -1283,18 +1396,23 @@ export function DriveLogPanel({
             <LocateFixed size={17} /> {currentStatusLabel}
           </p>
           <RouteMap
+            userID={userID}
             points={[]}
             plannedRoute={plannedRoute?.coordinates ?? []}
             current={currentPosition}
             destination={destination}
             followCurrent={followCurrent}
+            focusRequest={currentFocusRequest}
             onManualMove={() => setFollowCurrent(false)}
           />
           <button
             className="drive-follow-button"
             type="button"
             disabled={!currentPosition}
-            onClick={() => setFollowCurrent(true)}
+            onClick={() => {
+              setFollowCurrent(true);
+              setCurrentFocusRequest((current) => current + 1);
+            }}
           >
             <Crosshair size={17} /> 現在地へ戻る
           </button>

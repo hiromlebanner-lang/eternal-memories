@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   distanceInMeters,
   getCurrentPosition,
+  getNearbyLocationZoom,
   groupPhotosByLocation,
 } from "../src/lib/location";
 import { photo } from "./fixtures";
@@ -38,6 +39,13 @@ describe("位置情報と同一地点", () => {
       value: undefined,
     });
     await expect(getCurrentPosition()).rejects.toThrow("位置情報");
+  });
+
+  it("現在地の精度と画面幅に応じて近距離表示のズームを選ぶ", () => {
+    expect(getNearbyLocationZoom(30, 390)).toBe(16);
+    expect(getNearbyLocationZoom(150, 390)).toBe(15);
+    expect(getNearbyLocationZoom(30, 1280)).toBe(17);
+    expect(getNearbyLocationZoom(600, 390)).toBe(14);
   });
 
   it("10 60m以内をまとめ、離れた地点は分ける", () => {

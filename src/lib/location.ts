@@ -132,3 +132,13 @@ export function getCurrentPosition(): Promise<{
     );
   });
 }
+
+export function getNearbyLocationZoom(
+  accuracy: number,
+  viewportWidth: number,
+) {
+  const compact = viewportWidth < 430;
+  if (accuracy <= 100) return compact ? 16 : 17;
+  if (accuracy <= 300) return compact ? 15 : 16;
+  return 14;
+}
