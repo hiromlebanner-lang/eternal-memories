@@ -36,25 +36,15 @@ export interface Album {
   icon?: string;
   theme_color?: string;
   is_favorite?: boolean;
-  folder_id?: string | null;
-  folder_name?: string | null;
   tags?: string[];
   member_names?: string[];
+  search_text?: string;
   last_viewed_at?: string | null;
+  unread_count?: number;
   offline_enabled?: boolean;
   role: AlbumRole;
   photo_count?: number;
   member_count?: number;
-}
-
-export interface AlbumFolder {
-  id: string;
-  user_id: string;
-  name: string;
-  icon: string;
-  theme_color: string;
-  created_at: string;
-  updated_at: string;
 }
 
 export type AlbumSort =
@@ -62,7 +52,9 @@ export type AlbumSort =
   | "created"
   | "name"
   | "photos"
-  | "favorites";
+  | "favorites"
+  | "unread"
+  | "recent";
 
 export interface AlbumInviteSettings {
   invite_code: string;

@@ -29,7 +29,6 @@ const data = vi.hoisted(() => ({
   createAlbum: vi.fn(),
   deletePhoto: vi.fn(),
   loadAlbumInviteCode: vi.fn(),
-  loadAlbumFolders: vi.fn(),
   loadAlbums: vi.fn(),
   loadRecentAlbumPhotos: vi.fn(),
   loadMyDirectAlbumInvitations: vi.fn(),
@@ -103,7 +102,6 @@ beforeEach(() => {
   );
   vi.stubGlobal("fetch", fetchMock);
   data.loadAlbums.mockResolvedValue({ data: [], fromCache: false });
-  data.loadAlbumFolders.mockResolvedValue([]);
   data.loadRecentAlbumPhotos.mockResolvedValue({
     data: [],
     fromCache: false,
@@ -143,7 +141,7 @@ describe("Supabase Auth連携", () => {
     const user = userEvent.setup();
     render(<App />);
     await screen.findByText("Eternal memoriesにログイン");
-    expect(screen.queryByText("アルバムはまだありません。")).not.toBeInTheDocument();
+    expect(screen.queryByText("まだアルバムがありません")).not.toBeInTheDocument();
     await user.type(screen.getByLabelText("メールアドレス"), " Hana@Example.COM ");
     await user.type(screen.getByLabelText("パスワード"), " Password1 ");
     await user.click(
@@ -180,7 +178,7 @@ describe("Supabase Auth連携", () => {
       });
     });
 
-    await screen.findByText("アルバムはまだありません。");
+    await screen.findByText("まだアルバムがありません");
     expect(data.loadAlbums).toHaveBeenCalledWith("user-1");
 
     await act(async () => {
@@ -220,7 +218,7 @@ describe("Supabase Auth連携", () => {
       await screen.findByText("アルバムを読み込んでいます…"),
     ).toBeInTheDocument();
     expect(
-      screen.queryByText("アルバムはまだありません。"),
+      screen.queryByText("まだアルバムがありません"),
     ).not.toBeInTheDocument();
 
     await act(async () => {
@@ -228,7 +226,7 @@ describe("Supabase Auth連携", () => {
     });
 
     expect(
-      await screen.findByText("アルバムはまだありません。"),
+      await screen.findByText("まだアルバムがありません"),
     ).toBeInTheDocument();
   });
 
@@ -265,7 +263,7 @@ describe("Supabase Auth連携", () => {
         },
       });
     });
-    await screen.findByText("アルバムはまだありません。");
+    await screen.findByText("まだアルバムがありません");
     await user.click(screen.getAllByRole("button", { name: "設定" })[0]);
     await user.click(screen.getByRole("button", { name: /ログアウト/ }));
     expect(auth.signOut).not.toHaveBeenCalled();
@@ -291,7 +289,7 @@ describe("Supabase Auth連携", () => {
       });
     });
 
-    await screen.findByText("アルバムはまだありません。");
+    await screen.findByText("まだアルバムがありません");
     const navigation = screen.getByRole("navigation", {
       name: "メインメニュー",
     });

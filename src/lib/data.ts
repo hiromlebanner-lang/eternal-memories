@@ -1,7 +1,6 @@
 import { del, get, keys, set } from "idb-keyval";
 import type {
   Album,
-  AlbumFolder,
   AlbumInviteSettings,
   AlbumInvitation,
   AlbumJoinRequest,
@@ -116,7 +115,6 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
       { data: photoRows, error: photoError },
       { data: memberRows, error: memberError },
       { data: preferenceRows, error: preferenceError },
-      { data: folderRows, error: folderError },
       { data: tagRows, error: tagError },
     ] = await Promise.all([
       loadAlbumRows(),
@@ -126,19 +124,15 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
         .eq("user_id", userID),
       client
         .from("photos")
-        .select("id, album_id, storage_path, captured_at, created_at"),
+        .select(
+          "id, album_id, storage_path, title, caption, captured_at, created_at",
+        ),
       client
         .from("album_members")
         .select("album_id, user_id, profiles(display_name)"),
       client
         .from("user_album_preferences")
-        .select(
-          "album_id, folder_id, is_favorite, last_viewed_at",
-        )
-        .eq("user_id", userID),
-      client
-        .from("album_folders")
-        .select("id, user_id, name, icon, theme_color, created_at, updated_at")
+        .select("album_id, is_favorite, last_viewed_at")
         .eq("user_id", userID),
       client.from("album_tags").select("album_id, tag"),
     ]);
@@ -148,7 +142,6 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
     if (photoError) throw photoError;
     if (memberError) throw memberError;
     if (preferenceError) throw preferenceError;
-    if (folderError) throw folderError;
     if (tagError) throw tagError;
 
     const roleByAlbum = new Map(
@@ -160,6 +153,8 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
     const photoCounts = new Map<string, number>();
     const memberCounts = new Map<string, number>();
     const memberNames = new Map<string, string[]>();
+    const photoCreatedAtByAlbum = new Map<string, number[]>();
+    const photoSearchTextByAlbum = new Map<string, string[]>();
     const newestPhotoByAlbum = new Map<
       string,
       {
@@ -173,6 +168,15 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
     for (const row of photoRows ?? []) {
       if (!row.album_id) continue;
       photoCounts.set(row.album_id, (photoCounts.get(row.album_id) ?? 0) + 1);
+      const createdTimes = photoCreatedAtByAlbum.get(row.album_id) ?? [];
+      createdTimes.push(new Date(row.created_at).getTime());
+      photoCreatedAtByAlbum.set(row.album_id, createdTimes);
+      const photoText = [row.title, row.caption].filter(Boolean).join(" ");
+      if (photoText) {
+        const searchText = photoSearchTextByAlbum.get(row.album_id) ?? [];
+        searchText.push(photoText);
+        photoSearchTextByAlbum.set(row.album_id, searchText);
+      }
       const current = newestPhotoByAlbum.get(row.album_id);
       if (
         !current ||
@@ -228,9 +232,6 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
         preference.album_id,
         preference,
       ]),
-    );
-    const foldersByID = new Map(
-      ((folderRows ?? []) as AlbumFolder[]).map((folder) => [folder.id, folder]),
     );
     const tagsByAlbum = new Map<string, string[]>();
     for (const row of tagRows ?? []) {
@@ -293,10 +294,10 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
       const membersCanInvite =
         "members_can_invite" in album && Boolean(album.members_can_invite);
       const preference = preferenceByAlbum.get(album.id);
-      const folder = preference?.folder_id
-        ? foldersByID.get(preference.folder_id)
-        : undefined;
       const coverPhoto = coverPhotoByAlbum.get(album.id);
+      const viewedAt = preference?.last_viewed_at
+        ? new Date(preference.last_viewed_at).getTime()
+        : 0;
       result.push({
         id: album.id,
         name: album.name,
@@ -338,11 +339,13 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
             ? album.theme_color
             : "#c65476",
         is_favorite: preference?.is_favorite ?? false,
-        folder_id: preference?.folder_id ?? null,
-        folder_name: folder?.name ?? null,
         tags: tagsByAlbum.get(album.id) ?? [],
         member_names: memberNames.get(album.id) ?? [],
+        search_text: (photoSearchTextByAlbum.get(album.id) ?? []).join(" "),
         last_viewed_at: preference?.last_viewed_at ?? null,
+        unread_count: (photoCreatedAtByAlbum.get(album.id) ?? []).filter(
+          (createdAt) => createdAt > viewedAt,
+        ).length,
         offline_enabled: false,
         role,
         photo_count: photoCounts.get(album.id) ?? 0,
@@ -370,7 +373,6 @@ export async function saveAlbumPreference(input: {
   userID: string;
   albumID: string;
   isFavorite?: boolean;
-  folderID?: string | null;
   viewedNow?: boolean;
 }) {
   const client = requireSupabase();
@@ -382,7 +384,6 @@ export async function saveAlbumPreference(input: {
   if (input.isFavorite !== undefined) {
     updates.is_favorite = input.isFavorite;
   }
-  if (input.folderID !== undefined) updates.folder_id = input.folderID;
   if (input.viewedNow) updates.last_viewed_at = new Date().toISOString();
 
   const { error } = await client
@@ -391,62 +392,6 @@ export async function saveAlbumPreference(input: {
   if (error) {
     throw toAppError(error, "アルバムの設定を保存できませんでした。");
   }
-}
-
-export async function loadAlbumFolders(userID: string): Promise<AlbumFolder[]> {
-  const client = requireSupabase();
-  const { data, error } = await client
-    .from("album_folders")
-    .select("id, user_id, name, icon, theme_color, created_at, updated_at")
-    .eq("user_id", userID)
-    .order("name");
-  if (error) throw toAppError(error, "フォルダを読み込めませんでした。");
-  return (data ?? []) as AlbumFolder[];
-}
-
-export async function createAlbumFolder(
-  userID: string,
-  name: string,
-  themeColor: string,
-) {
-  const client = requireSupabase();
-  const { data, error } = await client
-    .from("album_folders")
-    .insert({
-      user_id: userID,
-      name: name.trim(),
-      theme_color: themeColor,
-    })
-    .select("id, user_id, name, icon, theme_color, created_at, updated_at")
-    .single();
-  if (error) throw toAppError(error, "フォルダを作成できませんでした。");
-  return data as AlbumFolder;
-}
-
-export async function updateAlbumFolder(input: {
-  folderID: string;
-  name: string;
-  themeColor: string;
-}) {
-  const client = requireSupabase();
-  const { error } = await client
-    .from("album_folders")
-    .update({
-      name: input.name.trim(),
-      theme_color: input.themeColor,
-      updated_at: new Date().toISOString(),
-    })
-    .eq("id", input.folderID);
-  if (error) throw toAppError(error, "フォルダを更新できませんでした。");
-}
-
-export async function deleteAlbumFolder(folderID: string) {
-  const client = requireSupabase();
-  const { error } = await client
-    .from("album_folders")
-    .delete()
-    .eq("id", folderID);
-  if (error) throw toAppError(error, "フォルダを削除できませんでした。");
 }
 
 export async function updateAlbumPresentation(input: {

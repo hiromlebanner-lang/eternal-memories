@@ -13,6 +13,7 @@ it("アルバムを検索し、お気に入りとオフライン保存を操作�
     owner_name: "のぐお",
     tags: ["家族"],
     updated_at: "2026-07-29T01:00:00Z",
+    unread_count: 3,
   };
   const second = {
     ...album("member"),
@@ -27,7 +28,6 @@ it("アルバムを検索し、お気に入りとオフライン保存を操作�
       userID="user-1"
       albums={[first, second]}
       recentPhotos={[photo()]}
-      folders={[]}
       loading={false}
       onOpen={vi.fn()}
       onOpenPhoto={vi.fn()}
@@ -35,15 +35,12 @@ it("アルバムを検索し、お気に入りとオフライン保存を操作�
       onCreate={vi.fn()}
       onToggleFavorite={favorite}
       onToggleOffline={offline}
-      onCreateFolder={vi.fn(async () => undefined)}
-      onUpdateFolder={vi.fn(async () => undefined)}
-      onDeleteFolder={vi.fn(async () => undefined)}
     />,
   );
 
   expect(screen.getByRole("heading", { name: "専用アルバム" })).toBeVisible();
   await user.type(
-    screen.getByPlaceholderText("アルバム・人・タグを検索"),
+    screen.getByPlaceholderText("アルバム・人・タグ・説明を検索"),
     "家族",
   );
   expect(screen.getByText("北海道旅行")).toBeVisible();
@@ -53,4 +50,11 @@ it("アルバムを検索し、お気に入りとオフライン保存を操作�
   expect(favorite).toHaveBeenCalledWith(first);
   await user.click(screen.getByLabelText("オフライン保存"));
   expect(offline).toHaveBeenCalledWith(first);
+
+  expect(screen.queryByText(/フォルダ/)).not.toBeInTheDocument();
+  await user.click(screen.getByLabelText("コンパクト一覧表示"));
+  expect(screen.getByLabelText("コンパクト一覧表示")).toHaveAttribute(
+    "aria-pressed",
+    "true",
+  );
 });

@@ -1,12 +1,11 @@
 import { Check, Image, Palette, Save, Tags } from "lucide-react";
 import { useState, type FormEvent } from "react";
-import type { Album, AlbumFolder, AlbumPhoto } from "../types";
+import type { Album, AlbumPhoto } from "../types";
 import { Modal } from "./Modal";
 
 interface AlbumSettingsPanelProps {
   album: Album;
   photos: AlbumPhoto[];
-  folders: AlbumFolder[];
   onClose: () => void;
   onSave: (input: {
     coverPhotoID: string | null;
@@ -14,14 +13,12 @@ interface AlbumSettingsPanelProps {
     icon: string;
     themeColor: string;
     tags: string[];
-    folderID: string | null;
   }) => Promise<void>;
 }
 
 export function AlbumSettingsPanel({
   album,
   photos,
-  folders,
   onClose,
   onSave,
 }: AlbumSettingsPanelProps) {
@@ -37,7 +34,6 @@ export function AlbumSettingsPanel({
     album.theme_color ?? "#c65476",
   );
   const [tags, setTags] = useState((album.tags ?? []).join("、"));
-  const [folderID, setFolderID] = useState(album.folder_id ?? "");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -52,7 +48,6 @@ export function AlbumSettingsPanel({
         icon,
         themeColor,
         tags: tags.split(/[、,\s]+/).filter(Boolean),
-        folderID: folderID || null,
       });
       onClose();
     } catch (caught) {
@@ -127,20 +122,6 @@ export function AlbumSettingsPanel({
             </select>
           </label>
           <label className="field">
-            <span>フォルダ</span>
-            <select
-              value={folderID}
-              onChange={(event) => setFolderID(event.target.value)}
-            >
-              <option value="">フォルダなし</option>
-              {folders.map((folder) => (
-                <option key={folder.id} value={folder.id}>
-                  {folder.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
             <span><Palette size={15} /> テーマカラー</span>
             <input
               type="color"
@@ -182,7 +163,11 @@ export function AlbumSettingsPanel({
             {error}
           </p>
         ) : null}
-        <button className="primary-button" type="submit" disabled={busy}>
+        <button
+          className="primary-button"
+          type="submit"
+          disabled={busy || !canManage}
+        >
           <Save size={17} /> {busy ? "保存中…" : "設定を保存"}
         </button>
       </form>

@@ -53,15 +53,12 @@ import { SiteAdminPanel } from "./components/SiteAdminPanel";
 import {
   clearPrivateOfflineData,
   createAlbum,
-  createAlbumFolder,
   deleteAlbum,
-  deleteAlbumFolder,
   deleteOwnAccount,
   deleteProfileAvatar,
   deletePhoto,
   downloadAlbumPhoto,
   loadAlbumInviteSettings,
-  loadAlbumFolders,
   loadAlbums,
   loadInviteCodePreview,
   loadGlobalPhotos,
@@ -71,7 +68,6 @@ import {
   requestAlbumMembership,
   respondToDirectAlbumInvitation,
   saveAlbumPreference,
-  updateAlbumFolder,
   updateAlbumPresentation,
   updateProfileDisplayName,
   updatePhoto,
@@ -101,7 +97,6 @@ import type { SiteAdminContext } from "./lib/siteAdmin";
 import { CATEGORY_META } from "./types";
 import type {
   Album,
-  AlbumFolder,
   AlbumInvitation,
   AlbumPhoto,
   AppUser,
@@ -465,7 +460,6 @@ function Dashboard({
   const [albumHome, setAlbumHome] = useState(true);
   const [photos, setPhotos] = useState<AlbumPhoto[]>([]);
   const [recentAlbumPhotos, setRecentAlbumPhotos] = useState<AlbumPhoto[]>([]);
-  const [albumFolders, setAlbumFolders] = useState<AlbumFolder[]>([]);
   const [globalPhotos, setGlobalPhotos] = useState<AlbumPhoto[]>([]);
   const [globalMode, setGlobalMode] = useState(false);
   const [globalLoading, setGlobalLoading] = useState(false);
@@ -552,7 +546,6 @@ function Dashboard({
     setSelectedAlbumID("");
     setAlbumHome(true);
     setRecentAlbumPhotos([]);
-    setAlbumFolders([]);
     setPendingSyncCount(0);
     setAlbumLoadStatus("loading");
     setAlbumLoadError("");
@@ -653,9 +646,8 @@ function Dashboard({
             : (resolvedAlbums[0]?.id ?? ""),
         );
         setAlbumLoadStatus("success");
-        const [recentResult, foldersResult] = await Promise.allSettled([
+        const [recentResult] = await Promise.allSettled([
           loadRecentAlbumPhotos(userID),
-          loadAlbumFolders(userID),
         ]);
         if (requestID !== albumRequestID.current) return;
         if (recentResult.status === "fulfilled") {
@@ -663,9 +655,6 @@ function Dashboard({
           setUsingCache((current) =>
             current || recentResult.value.fromCache,
           );
-        }
-        if (foldersResult.status === "fulfilled") {
-          setAlbumFolders(foldersResult.value);
         }
       } catch (error) {
         if (requestID !== albumRequestID.current) return;
@@ -965,7 +954,11 @@ function Dashboard({
       setAlbums((current) =>
         current.map((album) =>
           album.id === albumID
-            ? { ...album, last_viewed_at: new Date().toISOString() }
+            ? {
+                ...album,
+                last_viewed_at: new Date().toISOString(),
+                unread_count: 0,
+              }
             : album,
         ),
       );
@@ -1016,7 +1009,6 @@ function Dashboard({
     icon: string;
     themeColor: string;
     tags: string[];
-    folderID: string | null;
   }) => {
     if (!selectedAlbum) return;
     if (selectedAlbum.role === "owner" || selectedAlbum.role === "admin") {
@@ -1025,11 +1017,6 @@ function Dashboard({
         ...input,
       });
     }
-    await saveAlbumPreference({
-      userID: user.id,
-      albumID: selectedAlbum.id,
-      folderID: input.folderID,
-    });
     await refreshAlbums();
     setToast("アルバム設定を保存しました。");
   };
@@ -1467,8 +1454,8 @@ function Dashboard({
             userID={user.id}
             albums={albums}
             recentPhotos={recentAlbumPhotos}
-            folders={albumFolders}
             loading={albumLoadStatus === "loading"}
+            hasPendingInvitations={directInvitations.length > 0}
             onOpen={openAlbum}
             onOpenPhoto={(photo) => {
               if (photo.album_id) openAlbum(photo.album_id);
@@ -1479,27 +1466,9 @@ function Dashboard({
               else setToast("地図を表示するアルバムを選択してください。");
             }}
             onCreate={() => setShowsAlbumManager(true)}
+            onOpenInvitations={() => setShowsDirectInvitations(true)}
             onToggleFavorite={toggleFavoriteAlbum}
             onToggleOffline={toggleOfflineAlbum}
-            onCreateFolder={async (name, color) => {
-              await createAlbumFolder(user.id, name, color);
-              setAlbumFolders(await loadAlbumFolders(user.id));
-              setToast("フォルダを追加しました。");
-            }}
-            onUpdateFolder={async (folderID, name, color) => {
-              await updateAlbumFolder({
-                folderID,
-                name,
-                themeColor: color,
-              });
-              await refreshAlbums();
-              setToast("フォルダを更新しました。");
-            }}
-            onDeleteFolder={async (folderID) => {
-              await deleteAlbumFolder(folderID);
-              await refreshAlbums();
-              setToast("フォルダを削除しました。アルバムは残っています。");
-            }}
           />
         ) : albumLoadStatus === "loading" && albums.length === 0 ? (
           <div className="loading-state">
@@ -1828,7 +1797,6 @@ function Dashboard({
         <AlbumSettingsPanel
           album={selectedAlbum}
           photos={photos}
-          folders={albumFolders}
           onClose={() => setShowsAlbumSettings(false)}
           onSave={saveAlbumSettings}
         />
