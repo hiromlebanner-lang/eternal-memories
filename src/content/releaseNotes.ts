@@ -10,6 +10,22 @@ export interface ReleaseNote {
 // 新しい更新を先頭へ追加してください。画面ではこの配列をそのまま新しい順に表示します。
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "2.0.1",
+    releasedAt: "2026-07-31",
+    categories: ["改善", "修正", "重要"],
+    changes: [
+      "パスワード再設定メールの送信から変更完了までの案内を改善しました",
+      "認証メールをEternal memoriesの日本語デザインへ統一しました",
+    ],
+    improvements: [
+      "メール再送と、メールが届かない場合の案内を分かりやすくしました",
+      "パスワードの表示切り替えと入力確認を追加しました",
+    ],
+    fixes: [
+      "期限切れまたは使用済みのリンクで、日本語の再操作画面を表示するよう修正しました",
+    ],
+  },
+  {
     version: "2.0.0",
     releasedAt: "2026-07-29",
     categories: ["新機能", "改善", "重要"],

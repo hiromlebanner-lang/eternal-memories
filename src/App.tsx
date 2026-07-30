@@ -167,6 +167,7 @@ export default function App() {
   const [authReady, setAuthReady] = useState(!isSupabaseConfigured);
   const [authRevision, setAuthRevision] = useState(0);
   const [passwordRecovery, setPasswordRecovery] = useState(false);
+  const [invalidRecoveryLink, setInvalidRecoveryLink] = useState(false);
   const passwordResetInFlight = useRef(false);
 
   useEffect(() => {
@@ -180,17 +181,20 @@ export default function App() {
     const oauthErrorCode = callbackURL.searchParams.get("error_code");
     const oauthDescription = callbackURL.searchParams.get("error_description");
     if (oauthError) {
-      console.error("OAuth callback failed:", oauthError, oauthDescription);
-      setAuthMessage(
-        oauthErrorCode === "otp_expired" ||
-          oauthDescription?.toLowerCase().includes("expired")
-          ? "パスワード再設定リンクの有効期限が切れているか、無効です。もう一度再設定メールを送信してください。"
-          : oauthError === "access_denied"
-          ? "ログインがキャンセルされました"
-          : oauthDescription?.toLowerCase().includes("already")
-            ? "このメールアドレスは別のログイン方法で登録されています"
-            : "認証情報を確認できませんでした",
-      );
+      if (callbackURL.pathname === "/reset-password") {
+        setInvalidRecoveryLink(true);
+        setPasswordRecovery(false);
+      } else {
+        setAuthMessage(
+          oauthError === "access_denied"
+            ? "ログインがキャンセルされました"
+            : oauthDescription?.toLowerCase().includes("already")
+              ? "このメールアドレスは別のログイン方法で登録されています"
+              : oauthErrorCode === "otp_expired"
+                ? "このリンクは使用できません。"
+                : "認証情報を確認できませんでした",
+        );
+      }
       callbackURL.searchParams.delete("error");
       callbackURL.searchParams.delete("error_code");
       callbackURL.searchParams.delete("error_description");
@@ -217,16 +221,18 @@ export default function App() {
       (event: AuthChangeEvent, nextSession) => {
         authEventReceived = true;
         applySession(nextSession, event === "SIGNED_IN");
-        if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
+        if (event === "PASSWORD_RECOVERY") {
+          setInvalidRecoveryLink(false);
+          setPasswordRecovery(true);
+        }
         if (
           event === "INITIAL_SESSION" &&
           window.location.pathname === "/reset-password" &&
           !nextSession
         ) {
           setPasswordRecovery(false);
-          setAuthMessage(
-            "パスワード再設定リンクの有効期限が切れているか、無効です。もう一度再設定メールを送信してください。",
-          );
+          setInvalidRecoveryLink(true);
+          setAuthMessage("");
         }
         if (event === "SIGNED_OUT") void clearPrivateOfflineData();
       },
@@ -236,7 +242,16 @@ export default function App() {
       .getSession()
       .then(({ data, error }) => {
         if (error) throw error;
-        if (!authEventReceived) applySession(data.session);
+        if (!authEventReceived) {
+          applySession(data.session);
+          if (
+            window.location.pathname === "/reset-password" &&
+            !data.session
+          ) {
+            setPasswordRecovery(false);
+            setInvalidRecoveryLink(true);
+          }
+        }
       })
       .catch((error) => {
         console.error("Initial session check failed:", error);
@@ -335,7 +350,7 @@ export default function App() {
       );
       if (error) throw error;
       setAuthMessage(
-        "入力内容を確認しました。登録済みのメールアドレスには、パスワード再設定メールを送信します。\n迷惑メールフォルダと入力したメールアドレスをご確認ください。\n数分待っても届かない場合は、時間を空けて再送してください。",
+        "入力されたメールアドレスが登録されている場合、パスワード再設定メールを送信しました。",
       );
     } finally {
       passwordResetInFlight.current = false;
@@ -351,6 +366,7 @@ export default function App() {
       const { error } = await supabase.auth.updateUser({ password });
       if (error) throw error;
       setPasswordRecovery(false);
+      setInvalidRecoveryLink(false);
       const url = new URL(window.location.href);
       url.pathname = "/";
       url.searchParams.delete("code");
@@ -359,15 +375,14 @@ export default function App() {
       await supabase.auth.signOut({ scope: "local" });
       await clearPrivateOfflineData();
       setAuthMessage(
-        "パスワードを更新しました。新しいパスワードでログインしてください。",
+        "パスワードを変更しました。\n新しいパスワードでログインしてください。",
       );
     } catch (error) {
-      console.error("Password update failed:", error);
       const message = error instanceof Error ? error.message.toLowerCase() : "";
       throw new Error(
         /session|token|expired|otp/.test(message)
-          ? "パスワード再設定リンクの有効期限が切れているか、無効です。もう一度再設定メールを送信してください。"
-          : "パスワードを更新できませんでした。時間を空けてもう一度お試しください。",
+          ? "このリンクは使用できません。有効期限が切れているか、すでに使用された可能性があります。"
+          : "パスワードの変更に失敗しました。時間を空けてもう一度お試しください。",
         { cause: error },
       );
     } finally {
@@ -388,17 +403,24 @@ export default function App() {
 
   const user = session?.user ? userFromSupabase(session.user) : null;
 
-  if (!user || passwordRecovery) {
+  if (!user || passwordRecovery || invalidRecoveryLink) {
     return (
       <AuthScreen
         configured={isSupabaseConfigured}
         busy={authBusy}
         message={authMessage}
         recoveryMode={passwordRecovery}
+        invalidRecoveryLink={invalidRecoveryLink}
         onEmailLogin={emailLogin}
         onEmailSignup={emailSignup}
         onPasswordResetRequest={requestPasswordReset}
         onPasswordUpdate={updatePassword}
+        onClearRecoveryLink={() => {
+          setInvalidRecoveryLink(false);
+          setPasswordRecovery(false);
+          setAuthMessage("");
+          window.history.replaceState({}, "", "/");
+        }}
         onGoogleLogin={googleLogin}
       />
     );

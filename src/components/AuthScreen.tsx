@@ -1,12 +1,20 @@
 import {
   ArrowLeft,
   ArrowRight,
+  Eye,
+  EyeOff,
   KeyRound,
   LockKeyhole,
   Mail,
   Sparkles,
 } from "lucide-react";
-import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import {
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useState,
+  type FormEvent,
+} from "react";
 
 type AuthMode = "login" | "signup" | "forgot";
 
@@ -63,6 +71,7 @@ interface AuthScreenProps {
   busy: boolean;
   message?: string;
   recoveryMode: boolean;
+  invalidRecoveryLink?: boolean;
   onEmailLogin: (email: string, password: string) => Promise<void>;
   onEmailSignup: (
     displayName: string,
@@ -71,6 +80,7 @@ interface AuthScreenProps {
   ) => Promise<void>;
   onPasswordResetRequest: (email: string) => Promise<void>;
   onPasswordUpdate: (password: string) => Promise<void>;
+  onClearRecoveryLink?: () => void;
   onGoogleLogin?: () => Promise<void>;
 }
 
@@ -79,16 +89,23 @@ export function AuthScreen({
   busy,
   message,
   recoveryMode,
+  invalidRecoveryLink = false,
   onEmailLogin,
   onEmailSignup,
   onPasswordResetRequest,
   onPasswordUpdate,
+  onClearRecoveryLink,
 }: AuthScreenProps) {
   const [mode, setMode] = useState<AuthMode>("login");
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [passwordConfirmation, setPasswordConfirmation] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [showPasswordConfirmation, setShowPasswordConfirmation] =
+    useState(false);
+  const [resetRequested, setResetRequested] = useState(false);
+  const [resendCooldown, setResendCooldown] = useState(0);
   const [error, setError] = useState("");
   const formRef = useRef<HTMLFormElement>(null);
 
@@ -102,20 +119,36 @@ export function AuthScreen({
     }
   }, []);
 
+  useEffect(() => {
+    if (resendCooldown <= 0) return;
+    const timer = window.setInterval(() => {
+      setResendCooldown((current) => Math.max(0, current - 1));
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [resendCooldown]);
+
+  const sendPasswordReset = async () => {
+    await onPasswordResetRequest(email);
+    setResetRequested(true);
+    setResendCooldown(60);
+  };
+
   const submit = async (event: FormEvent) => {
     event.preventDefault();
     setError("");
     try {
       if (recoveryMode) {
-        if (password.length < 8) {
+        const normalizedPassword = password.trim();
+        const normalizedConfirmation = passwordConfirmation.trim();
+        if (normalizedPassword.length < 8) {
           throw new Error("新しいパスワードは8文字以上で入力してください。");
         }
-        if (password !== passwordConfirmation) {
-          throw new Error("確認用パスワードが一致しません。");
+        if (normalizedPassword !== normalizedConfirmation) {
+          throw new Error("パスワードが一致しません。");
         }
-        await onPasswordUpdate(password);
+        await onPasswordUpdate(normalizedPassword);
       } else if (mode === "forgot") {
-        await onPasswordResetRequest(email);
+        await sendPasswordReset();
       } else if (mode === "login") {
         await onEmailLogin(email, password);
       } else {
@@ -133,13 +166,24 @@ export function AuthScreen({
     }
   };
 
-  const heading = recoveryMode
-    ? "新しいパスワードを設定"
-    : mode === "signup"
-      ? "アカウントを作成"
-      : mode === "forgot"
-        ? "パスワードを再設定"
-        : "Eternal memoriesにログイン";
+  const recoveryValidationMessage = recoveryMode
+    ? password && password.trim().length < 8
+      ? "パスワードは8文字以上で入力してください。"
+      : passwordConfirmation &&
+          password.trim() !== passwordConfirmation.trim()
+        ? "パスワードが一致しません。"
+        : ""
+    : "";
+
+  const heading = invalidRecoveryLink
+    ? "このリンクは使用できません"
+    : recoveryMode
+      ? "パスワードを再設定"
+      : mode === "signup"
+        ? "アカウントを作成"
+        : mode === "forgot"
+          ? "パスワードを再設定"
+          : "Eternal memoriesにログイン";
 
   return (
     <main className="auth-screen">
@@ -174,12 +218,50 @@ export function AuthScreen({
         </p>
         <div className="auth-card">
           <div className="auth-heading">
-            <p>{recoveryMode ? "安全なパスワードへ更新" : "おかえりなさい"}</p>
+            <p>
+              {invalidRecoveryLink
+                ? "リンクを確認できませんでした"
+                : recoveryMode
+                  ? "安全なパスワードへ更新"
+                  : "おかえりなさい"}
+            </p>
             <h2>{heading}</h2>
           </div>
 
-          {!recoveryMode && mode !== "forgot" ? (
-            <div className="auth-mode" role="tablist" aria-label="認証方法">
+          {invalidRecoveryLink ? (
+            <div className="auth-invalid-link" role="alert">
+              <p>
+                有効期限が切れているか、すでに使用された可能性があります。
+              </p>
+              <button
+                className="primary-button"
+                type="button"
+                onClick={() => {
+                  onClearRecoveryLink?.();
+                  setMode("forgot");
+                  setError("");
+                }}
+              >
+                再設定メールをもう一度送る
+                <ArrowRight size={18} />
+              </button>
+              <button
+                className="back-to-login"
+                type="button"
+                onClick={() => {
+                  onClearRecoveryLink?.();
+                  setMode("login");
+                  setError("");
+                }}
+              >
+                <ArrowLeft size={16} />
+                ログイン画面へ戻る
+              </button>
+            </div>
+          ) : (
+            <>
+              {!recoveryMode && mode !== "forgot" ? (
+                <div className="auth-mode" role="tablist" aria-label="認証方法">
               <button
                 type="button"
                 className={mode === "login" ? "is-active" : ""}
@@ -200,22 +282,22 @@ export function AuthScreen({
               >
                 新規登録
               </button>
-            </div>
-          ) : null}
+                </div>
+              ) : null}
 
           {mode === "forgot" && !recoveryMode ? (
             <p className="auth-intro">
-              登録したメールアドレスへ、パスワード再設定リンクを送信します。
+              登録したメールアドレスへ、Eternal memoriesからパスワード再設定リンクを送信します。
             </p>
           ) : null}
 
           {recoveryMode ? (
             <p className="auth-intro">
-              8文字以上の新しいパスワードを入力してください。更新後は一度ログアウトします。
+              新しいパスワードを入力してください。
             </p>
           ) : null}
 
-          <form ref={formRef} className="auth-form" onSubmit={submit}>
+              <form ref={formRef} className="auth-form" onSubmit={submit}>
             {mode === "signup" && !recoveryMode ? (
               <label>
                 <span>表示名</span>
@@ -232,7 +314,7 @@ export function AuthScreen({
               </label>
             ) : null}
 
-            {!recoveryMode ? (
+            {!recoveryMode && !(mode === "forgot" && resetRequested) ? (
               <label>
                 <span>メールアドレス</span>
                 <div className="input-shell">
@@ -262,7 +344,7 @@ export function AuthScreen({
                 <div className="input-shell">
                   <LockKeyhole size={18} />
                   <input
-                    type="password"
+                    type={showPassword ? "text" : "password"}
                     value={password}
                     onChange={(event) => setPassword(event.target.value)}
                     placeholder={recoveryMode ? "8文字以上" : "8文字以上"}
@@ -274,6 +356,18 @@ export function AuthScreen({
                     minLength={8}
                     required
                   />
+                  <button
+                    className="password-visibility-button"
+                    type="button"
+                    aria-label={
+                      showPassword
+                        ? "パスワードを非表示"
+                        : "パスワードを表示"
+                    }
+                    onClick={() => setShowPassword((current) => !current)}
+                  >
+                    {showPassword ? <EyeOff size={18} /> : <Eye size={18} />}
+                  </button>
                 </div>
               </label>
             ) : null}
@@ -284,7 +378,7 @@ export function AuthScreen({
                 <div className="input-shell">
                   <KeyRound size={18} />
                   <input
-                    type="password"
+                    type={showPasswordConfirmation ? "text" : "password"}
                     value={passwordConfirmation}
                     onChange={(event) => setPasswordConfirmation(event.target.value)}
                     placeholder="もう一度入力"
@@ -292,6 +386,24 @@ export function AuthScreen({
                     minLength={8}
                     required
                   />
+                  <button
+                    className="password-visibility-button"
+                    type="button"
+                    aria-label={
+                      showPasswordConfirmation
+                        ? "確認用パスワードを非表示"
+                        : "確認用パスワードを表示"
+                    }
+                    onClick={() =>
+                      setShowPasswordConfirmation((current) => !current)
+                    }
+                  >
+                    {showPasswordConfirmation ? (
+                      <EyeOff size={18} />
+                    ) : (
+                      <Eye size={18} />
+                    )}
+                  </button>
                 </div>
               </label>
             ) : null}
@@ -305,16 +417,45 @@ export function AuthScreen({
                   setError("");
                 }}
               >
-                パスワードを忘れた場合
+                パスワードを忘れた方
               </button>
             ) : null}
 
-            {error || message ? (
+            {mode === "forgot" && resetRequested ? (
+              <div className="auth-reset-sent" role="status">
+                <strong>
+                  入力されたメールアドレスが登録されている場合、パスワード再設定メールを送信しました。
+                </strong>
+                <ul>
+                  <li>迷惑メールフォルダを確認してください</li>
+                  <li>入力したメールアドレスを確認してください</li>
+                  <li>受信拒否設定を確認してください</li>
+                  <li>数分待っても届かない場合は再送してください</li>
+                </ul>
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={busy || resendCooldown > 0}
+                  onClick={() => {
+                    setError("");
+                    void sendPasswordReset().catch((caught) =>
+                      setError(localizedAuthError(caught, "forgot")),
+                    );
+                  }}
+                >
+                  {resendCooldown > 0
+                    ? `${resendCooldown}秒後に再送できます`
+                    : "メールを再送する"}
+                </button>
+              </div>
+            ) : null}
+
+            {error || recoveryValidationMessage || (!resetRequested && message) ? (
               <p
                 role={error ? "alert" : "status"}
                 className={error ? "form-message form-message--error" : "form-message"}
               >
-                {error || message}
+                {error || recoveryValidationMessage || message}
               </p>
             ) : null}
 
@@ -324,18 +465,24 @@ export function AuthScreen({
               </p>
             ) : null}
 
-            <button className="primary-button" type="submit" disabled={busy || !configured}>
-              {busy
-                ? "しばらくお待ちください…"
-                : recoveryMode
-                  ? "パスワードを更新"
-                  : mode === "forgot"
-                    ? "再設定メールを送信"
-                    : mode === "login"
-                      ? "ログイン"
-                      : "登録してはじめる"}
-              {!busy ? <ArrowRight size={18} /> : null}
-            </button>
+                {!(mode === "forgot" && resetRequested) ? (
+                  <button
+                    className="primary-button"
+                    type="submit"
+                    disabled={busy || !configured}
+                  >
+                    {busy
+                      ? "しばらくお待ちください…"
+                      : recoveryMode
+                        ? "保存する"
+                        : mode === "forgot"
+                          ? "再設定メールを送信"
+                          : mode === "login"
+                            ? "ログイン"
+                            : "登録してはじめる"}
+                    {!busy ? <ArrowRight size={18} /> : null}
+                  </button>
+                ) : null}
 
             {mode === "forgot" && !recoveryMode ? (
               <button
@@ -343,6 +490,8 @@ export function AuthScreen({
                 type="button"
                 onClick={() => {
                   setMode("login");
+                  setResetRequested(false);
+                  setResendCooldown(0);
                   setError("");
                 }}
               >
@@ -350,7 +499,9 @@ export function AuthScreen({
                 ログインへ戻る
               </button>
             ) : null}
-          </form>
+              </form>
+            </>
+          )}
         </div>
       </section>
     </main>

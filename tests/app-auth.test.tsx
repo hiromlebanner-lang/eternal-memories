@@ -237,7 +237,7 @@ describe("Supabase Auth連携", () => {
     render(<App />);
     await screen.findByText("Eternal memoriesにログイン");
 
-    await user.click(screen.getByRole("button", { name: "パスワードを忘れた場合" }));
+    await user.click(screen.getByRole("button", { name: "パスワードを忘れた方" }));
     await user.type(screen.getByLabelText("メールアドレス"), "Hana@Example.COM");
     await user.click(screen.getByRole("button", { name: /再設定メールを送信/ }));
 

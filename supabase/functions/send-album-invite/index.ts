@@ -178,8 +178,26 @@ Deno.serve(async (request) => {
     appURL.searchParams.set("invite", invitation.token);
     const inviteURL = appURL.toString();
     const albumName = cleanHeaderText(album.name) || "共有アルバム";
+    const inviterName =
+      cleanHeaderText(
+        user.user_metadata?.display_name ??
+          user.user_metadata?.full_name ??
+          user.email?.split("@")[0] ??
+          "メンバー",
+      ) || "メンバー";
+    const expiresAt = new Intl.DateTimeFormat("ja-JP", {
+      dateStyle: "long",
+      timeStyle: "short",
+      timeZone: "Asia/Tokyo",
+    }).format(new Date(invitation.expires_at));
+    const cleanedFrom = cleanHeaderText(from);
+    const brandedFrom = cleanedFrom.includes("<")
+      ? cleanedFrom
+      : `Eternal memories <${cleanedFrom}>`;
     const safeAlbumName = escapeHTML(albumName);
+    const safeInviterName = escapeHTML(inviterName);
     const safeInviteURL = escapeHTML(inviteURL);
+    const safeExpiresAt = escapeHTML(expiresAt);
     const roleLabel =
       invitation.role === "admin"
         ? "管理者"
@@ -195,22 +213,26 @@ Deno.serve(async (request) => {
         "Idempotency-Key": `mapalbum-invite-${invitation.id}`,
       },
       body: JSON.stringify({
-        from,
+        from: brandedFrom,
         to: [invitation.email],
-        subject: `「${albumName}」へのMapAlbum招待`,
+        subject: "【Eternal memories】共有アルバムへの招待が届いています",
         text:
-          `MapAlbum「${albumName}」へ招待されました。\n` +
-          `予定されている権限: ${roleLabel}\n\n` +
-          `${inviteURL}\n\n` +
-          "リンクからログインし、「参加する」または「参加しない」を選択してください。",
+          `${inviterName}さんから、Eternal memoriesの共有アルバム「${albumName}」へ招待されました。\n` +
+          `権限: ${roleLabel}\n有効期限: ${expiresAt}\n\n` +
+          `参加内容を確認する:\n${inviteURL}\n\n` +
+          "このメールに心当たりがない場合は、操作せずそのまま破棄してください。",
         html: `
-          <div style="font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;max-width:560px;margin:auto;color:#273235">
-            <div style="padding:28px;border:1px solid #e7e8e8;border-radius:24px">
-              <p style="margin:0 0 8px;color:#ff665b;font-weight:700">MapAlbum</p>
-              <h1 style="margin:0 0 14px;font-size:24px">「${safeAlbumName}」への招待</h1>
-              <p style="line-height:1.7">共有写真アルバムへ招待されました。予定されている権限は「${roleLabel}」です。</p>
-              <a href="${safeInviteURL}" style="display:inline-block;margin:14px 0;padding:13px 20px;border-radius:14px;background:#ff665b;color:#fff;text-decoration:none;font-weight:700">招待を確認する</a>
-              <p style="color:#6d7476;font-size:13px;line-height:1.7">リンクから招待されたメールアドレスでログインし、「参加する」または「参加しない」を選択してください。</p>
+          <div style="margin:0;background:#fdf5f8;padding:24px 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;color:#4b3340">
+            <div style="max-width:560px;margin:auto;padding:30px 24px;border:1px solid #ead9e1;border-radius:22px;background:#fff">
+              <div style="margin-bottom:26px;color:#5b3448;font-size:20px;font-weight:700">Eternal memories</div>
+              <h1 style="margin:0 0 18px;color:#5b3448;font-size:24px;line-height:1.4">共有アルバムへの招待</h1>
+              <p style="font-size:16px;line-height:1.75">${safeInviterName}さんから、共有アルバム「${safeAlbumName}」へ招待されました。</p>
+              <p style="font-size:15px;line-height:1.75">権限: ${roleLabel}<br>有効期限: ${safeExpiresAt}</p>
+              <a href="${safeInviteURL}" style="display:block;margin:24px 0;padding:15px 18px;border-radius:14px;background:#ad4d72;color:#fff;text-align:center;text-decoration:none;font-weight:700">参加内容を確認する</a>
+              <p style="color:#765f6b;font-size:13px;line-height:1.7">ボタンを利用できない場合は、次のURLをブラウザで開いてください。</p>
+              <p style="padding:12px;border-radius:10px;background:#f8edf2;color:#76566a;font-size:12px;line-height:1.6;overflow-wrap:anywhere">${safeInviteURL}</p>
+              <p style="color:#765f6b;font-size:13px;line-height:1.7">このメールに心当たりがない場合は、操作せずそのまま破棄してください。</p>
+              <p style="margin-top:28px;padding-top:20px;border-top:1px solid #eadde3;color:#765f6b;font-size:13px">Eternal memories<br>家族・友人との思い出を、写真と地図に残そう。</p>
             </div>
           </div>
         `,

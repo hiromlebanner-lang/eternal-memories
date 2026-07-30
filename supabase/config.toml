@@ -1,3 +1,29 @@
+[auth.email.template.confirmation]
+subject = "【Eternal memories】メールアドレス確認のお願い"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.recovery]
+subject = "【Eternal memories】パスワード再設定のご案内"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.email_change]
+subject = "【Eternal memories】メールアドレス変更の確認"
+content_path = "./supabase/templates/email_change.html"
+
+[auth.email.template.invite]
+subject = "【Eternal memories】Eternal memoriesへの招待"
+content_path = "./supabase/templates/invite.html"
+
+[auth.email.notification.password_changed]
+enabled = true
+subject = "【Eternal memories】パスワード変更完了のお知らせ"
+content_path = "./supabase/templates/password_changed_notification.html"
+
+[auth.email.notification.email_changed]
+enabled = true
+subject = "【Eternal memories】メールアドレス変更完了のお知らせ"
+content_path = "./supabase/templates/email_changed_notification.html"
+
 [functions.send-album-invite]
 verify_jwt = true
 

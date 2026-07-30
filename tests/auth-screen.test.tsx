@@ -109,7 +109,7 @@ describe("認証画面", () => {
     const props = authProps();
     render(<AuthScreen {...props} />);
 
-    await user.click(screen.getByRole("button", { name: "パスワードを忘れた場合" }));
+    await user.click(screen.getByRole("button", { name: "パスワードを忘れた方" }));
     await user.type(screen.getByLabelText("メールアドレス"), "hana@example.com");
     await user.click(screen.getByRole("button", { name: /再設定メールを送信/ }));
 
@@ -121,7 +121,7 @@ describe("認証画面", () => {
     const props = authProps();
     render(<AuthScreen {...props} />);
 
-    await user.click(screen.getByRole("button", { name: "パスワードを忘れた場合" }));
+    await user.click(screen.getByRole("button", { name: "パスワードを忘れた方" }));
     await user.type(screen.getByLabelText("メールアドレス"), "invalid-email");
     await user.click(screen.getByRole("button", { name: /再設定メールを送信/ }));
 
@@ -141,9 +141,45 @@ describe("認証画面", () => {
       screen.getByLabelText("新しいパスワード（確認）"),
       "newpass12",
     );
-    await user.click(screen.getByRole("button", { name: /パスワードを更新/ }));
+    await user.click(screen.getByRole("button", { name: /保存する/ }));
 
     expect(props.onPasswordUpdate).toHaveBeenCalledWith("newpass12");
+  });
+
+  it("再設定要求後は登録有無を明かさず、再送を一時的に無効化する", async () => {
+    const user = userEvent.setup();
+    const props = authProps();
+    render(<AuthScreen {...props} />);
+
+    await user.click(screen.getByRole("button", { name: "パスワードを忘れた方" }));
+    await user.type(screen.getByLabelText("メールアドレス"), "hana@example.com");
+    await user.click(screen.getByRole("button", { name: /再設定メールを送信/ }));
+
+    expect(screen.getByRole("status")).toHaveTextContent(
+      "入力されたメールアドレスが登録されている場合",
+    );
+    expect(
+      screen.getByRole("button", { name: "60秒後に再送できます" }),
+    ).toBeDisabled();
+    expect(screen.getByText("迷惑メールフォルダを確認してください")).toBeInTheDocument();
+  });
+
+  it("期限切れまたは使用済みの再設定リンクへ日本語の再操作を表示する", async () => {
+    const user = userEvent.setup();
+    const props = {
+      ...authProps(),
+      invalidRecoveryLink: true,
+      onClearRecoveryLink: vi.fn(),
+    };
+    render(<AuthScreen {...props} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "有効期限が切れているか、すでに使用された可能性があります。",
+    );
+    await user.click(
+      screen.getByRole("button", { name: /再設定メールをもう一度送る/ }),
+    );
+    expect(props.onClearRecoveryLink).toHaveBeenCalled();
   });
 
   it("未設定時は全認証操作を無効化して設定警告を出す", () => {
