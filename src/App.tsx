@@ -51,6 +51,10 @@ import { PhotoGrid } from "./components/PhotoGrid";
 import { ShareAlbumModal } from "./components/ShareAlbumModal";
 import { SiteAdminPanel } from "./components/SiteAdminPanel";
 import {
+  getAlbumThemeTemplate,
+  type AlbumThemeTemplateID,
+} from "./lib/albumThemes";
+import {
   clearPrivateOfflineData,
   createAlbum,
   deleteAlbum,
@@ -1009,6 +1013,7 @@ function Dashboard({
     icon: string;
     themeColor: string;
     tags: string[];
+    templateID: AlbumThemeTemplateID | null;
   }) => {
     if (!selectedAlbum) return;
     if (selectedAlbum.role === "owner" || selectedAlbum.role === "admin") {
@@ -1140,8 +1145,22 @@ function Dashboard({
     );
   };
 
-  const addAlbum = async (name: string, description: string) => {
+  const addAlbum = async (
+    name: string,
+    description: string,
+    templateID: AlbumThemeTemplateID,
+  ) => {
     const id = await createAlbum(name, description);
+    const template = getAlbumThemeTemplate(templateID);
+    await updateAlbumPresentation({
+      albumID: id,
+      coverPhotoID: null,
+      visibility: "private",
+      icon: template.settings.albumIcon,
+      themeColor: template.settings.themeColor,
+      tags: template.settings.initialTags,
+      templateID,
+    });
     await refreshAlbums();
     setSelectedAlbumID(id);
     setToast("アルバムを作成しました");
@@ -1764,7 +1783,13 @@ function Dashboard({
             setShowsPhotoEditor(true);
           }}
           onDelete={removePhoto}
-          onDownload={downloadAlbumPhoto}
+          onDownload={(photo, onProgress) =>
+            downloadAlbumPhoto(
+              photo,
+              onProgress,
+              selectedAlbum?.theme_settings,
+            )
+          }
         />
       ) : null}
 

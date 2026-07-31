@@ -9,6 +9,12 @@ import type {
   AlbumRole,
   PhotoCategory,
 } from "../types";
+import {
+  getAlbumThemeTemplate,
+  isAlbumThemeSettings,
+  isAlbumThemeTemplateID,
+  type AlbumThemeTemplateID,
+} from "./albumThemes";
 import { compressPhoto } from "./image";
 import { formatErrorMessage, toAppError } from "./errors";
 import {
@@ -77,9 +83,16 @@ function supabaseErrorMessage(error: unknown) {
 function isMissingColumnError(error: unknown) {
   return (
     supabaseErrorCode(error) === "42703" &&
-    /owner_id|members_can_invite|invite_code_enabled|invite_code_expires_at|cover_photo_id|visibility|theme_color|icon/i.test(
+    /owner_id|members_can_invite|invite_code_enabled|invite_code_expires_at|cover_photo_id|visibility|theme_color|theme_template_id|theme_settings|icon/i.test(
       supabaseErrorMessage(error),
     )
+  );
+}
+
+function isMissingThemeColumnError(error: unknown) {
+  return (
+    supabaseErrorCode(error) === "42703" &&
+    /theme_template_id|theme_settings/i.test(supabaseErrorMessage(error))
   );
 }
 
@@ -101,7 +114,7 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
       const current = await client
         .from("albums")
         .select(
-          "id, name, description, owner_id, created_by, created_at, updated_at, members_can_invite, cover_photo_id, visibility, icon, theme_color",
+          "id, name, description, owner_id, created_by, created_at, updated_at, members_can_invite, cover_photo_id, visibility, icon, theme_color, theme_template_id, theme_settings",
         )
         .order("created_at", { ascending: false });
 
@@ -109,8 +122,22 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
         return current;
       }
 
-      // 20260725 migration適用前の既存環境でも、基本の招待コードを
-      // 利用できるように従来カラムだけで再取得する。
+      if (isMissingThemeColumnError(current.error)) {
+        const presentationCompatible = await client
+          .from("albums")
+          .select(
+            "id, name, description, owner_id, created_by, created_at, updated_at, members_can_invite, cover_photo_id, visibility, icon, theme_color",
+          )
+          .order("created_at", { ascending: false });
+        if (
+          !presentationCompatible.error ||
+          !isMissingColumnError(presentationCompatible.error)
+        ) {
+          return presentationCompatible;
+        }
+      }
+
+      // 既存の段階的なマイグレーション環境でも基本表示は維持する。
       return client
         .from("albums")
         .select("id, name, description, created_by, created_at")
@@ -346,6 +373,16 @@ export async function loadAlbums(userID: string): Promise<LoadResult<Album[]>> {
           "theme_color" in album && typeof album.theme_color === "string"
             ? album.theme_color
             : "#c65476",
+        theme_template_id:
+          "theme_template_id" in album &&
+          isAlbumThemeTemplateID(album.theme_template_id)
+            ? album.theme_template_id
+            : null,
+        theme_settings:
+          "theme_settings" in album &&
+          isAlbumThemeSettings(album.theme_settings)
+            ? album.theme_settings
+            : null,
         is_favorite: preference?.is_favorite ?? false,
         tags: tagsByAlbum.get(album.id) ?? [],
         member_names: memberNames.get(album.id) ?? [],
@@ -409,6 +446,7 @@ export async function updateAlbumPresentation(input: {
   icon: string;
   themeColor: string;
   tags: string[];
+  templateID: AlbumThemeTemplateID | null;
 }) {
   const client = requireSupabase();
   const normalizedTags = [
@@ -419,13 +457,25 @@ export async function updateAlbumPresentation(input: {
       .map((tag) => tag.slice(0, 30)),
     ),
   ].slice(0, 12);
-  const { error } = await client.rpc("update_album_presentation", {
+  const template = input.templateID
+    ? getAlbumThemeTemplate(input.templateID)
+    : null;
+  const themeSettings = template
+    ? {
+        ...template.settings,
+        themeColor: input.themeColor,
+        albumIcon: input.icon,
+      }
+    : null;
+  const { error } = await client.rpc("update_album_presentation_v2", {
     p_album_id: input.albumID,
     p_cover_photo_id: input.coverPhotoID,
     p_visibility: input.visibility,
     p_icon: input.icon,
     p_theme_color: input.themeColor,
     p_tags: normalizedTags,
+    p_theme_template_id: input.templateID,
+    p_theme_settings: themeSettings,
   });
   if (error) {
     throw toAppError(error, "アルバムの表示設定を保存できませんでした。");
@@ -608,6 +658,7 @@ export async function loadGlobalPhotos(offset = 0, limit = 24) {
 export async function downloadAlbumPhoto(
   photo: AlbumPhoto,
   onProgress?: (progress: PhotoSaveProgress) => void,
+  themeSettings?: Album["theme_settings"],
 ): Promise<PhotoSaveResult> {
   onProgress?.("preparing");
   if (!navigator.onLine) {
@@ -630,6 +681,7 @@ export async function downloadAlbumPhoto(
     const offlineFile = await addClientWatermark(
       cachedBlob,
       photo.captured_at,
+      themeSettings,
     );
     return savePhotoToDevice(offlineFile, onProgress);
   }

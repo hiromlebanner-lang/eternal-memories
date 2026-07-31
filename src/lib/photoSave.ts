@@ -1,3 +1,5 @@
+import type { AlbumThemeSettings } from "./albumThemes";
+
 export type PhotoSaveProgress =
   | "preparing"
   | "generating"
@@ -89,6 +91,7 @@ export function savePreparedPhotoAsFile(file: File) {
 export async function addClientWatermark(
   source: Blob,
   capturedAt: string,
+  theme?: AlbumThemeSettings | null,
 ): Promise<File> {
   if (!isSupportedPhotoBlob(source)) {
     throw new Error("保存できる画像形式ではありません。");
@@ -106,21 +109,41 @@ export async function addClientWatermark(
     context.drawImage(bitmap, 0, 0);
 
     const shortSide = Math.min(canvas.width, canvas.height);
-    const fontSize = Math.round(Math.max(18, Math.min(54, shortSide * 0.035)));
+    const configuredSize = Math.min(
+      1.35,
+      Math.max(0.75, theme?.downloadImage.watermarkSize ?? 1),
+    );
+    const fontSize = Math.round(
+      Math.max(18, Math.min(54, shortSide * 0.035)) * configuredSize,
+    );
     const padding = Math.round(Math.max(8, fontSize * 0.42));
     const margin = Math.round(Math.max(14, shortSide * 0.025));
     context.font = `600 ${fontSize}px Arial, sans-serif`;
     const text = "Eternal memories";
     const boxWidth = Math.ceil(context.measureText(text).width + padding * 2);
     const boxHeight = Math.ceil(fontSize + padding * 1.65);
-    const x = Math.max(margin, canvas.width - margin - boxWidth);
-    const y = Math.max(margin, canvas.height - margin - boxHeight);
+    const position =
+      theme?.downloadImage.watermarkPosition ?? "bottom-right";
+    const x = position.endsWith("left")
+      ? margin
+      : Math.max(margin, canvas.width - margin - boxWidth);
+    const y = position.startsWith("top")
+      ? margin
+      : Math.max(margin, canvas.height - margin - boxHeight);
 
-    context.fillStyle = "rgba(0, 0, 0, 0.22)";
+    const backgroundOpacity = Math.min(
+      0.4,
+      Math.max(0.1, theme?.downloadImage.backgroundOpacity ?? 0.22),
+    );
+    const watermarkOpacity = Math.min(
+      0.8,
+      Math.max(0.35, theme?.downloadImage.watermarkOpacity ?? 0.68),
+    );
+    context.fillStyle = `rgba(0, 0, 0, ${backgroundOpacity})`;
     context.beginPath();
     context.roundRect(x, y, boxWidth, boxHeight, padding);
     context.fill();
-    context.fillStyle = "rgba(255, 255, 255, 0.68)";
+    context.fillStyle = `rgba(255, 255, 255, ${watermarkOpacity})`;
     context.shadowColor = "rgba(0, 0, 0, 0.35)";
     context.shadowBlur = 2;
     context.fillText(text, x + padding, y + padding + fontSize * 0.8);

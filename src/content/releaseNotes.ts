@@ -10,6 +10,20 @@ export interface ReleaseNote {
 // 新しい更新を先頭へ追加してください。画面ではこの配列をそのまま新しい順に表示します。
 export const RELEASE_NOTES: ReleaseNote[] = [
   {
+    version: "2.2.0",
+    releasedAt: "2026-07-31",
+    categories: ["新機能", "改善"],
+    changes: [
+      "アルバム作成時に、用途に合ったテーマを選べるようになりました",
+      "作成後もアルバムのテーマを変更できるようになりました",
+    ],
+    improvements: [
+      "テーマを選ぶだけで、色・アイコン・保存写真のロゴ設定をまとめて反映できるようになりました",
+      "既存の写真やコメントを残したまま、アルバムの雰囲気を変更できます",
+    ],
+    fixes: [],
+  },
+  {
     version: "2.1.1",
     releasedAt: "2026-07-31",
     categories: ["改善", "修正"],

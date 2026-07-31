@@ -10,6 +10,7 @@ const albumOrder = vi.hoisted(() => vi.fn());
 const albumEqName = vi.hoisted(() => vi.fn());
 const albumEqCreator = vi.hoisted(() => vi.fn());
 const albumSelect = vi.hoisted(() => vi.fn());
+const rpc = vi.hoisted(() => vi.fn());
 const albums = vi.hoisted(() => ({
   insert: albumInsert,
   select: albumSelect,
@@ -18,6 +19,7 @@ const albums = vi.hoisted(() => ({
 vi.mock("../src/lib/supabase", () => ({
   supabase: {
     auth,
+    rpc,
     from: vi.fn((table: string) => {
       if (table !== "albums") throw new Error(`Unexpected table: ${table}`);
       return albums;
@@ -25,7 +27,7 @@ vi.mock("../src/lib/supabase", () => ({
   },
 }));
 
-import { createAlbum } from "../src/lib/data";
+import { createAlbum, updateAlbumPresentation } from "../src/lib/data";
 
 beforeEach(() => {
   auth.getUser.mockResolvedValue({
@@ -42,6 +44,7 @@ beforeEach(() => {
     data: { id: "album-1" },
     error: null,
   });
+  rpc.mockResolvedValue({ data: null, error: null });
 });
 
 describe("アルバム作成", () => {
@@ -81,5 +84,33 @@ describe("アルバム作成", () => {
       "ログインし直してからアルバムを作成してください。",
     );
     expect(albumInsert).not.toHaveBeenCalled();
+  });
+});
+
+describe("アルバムテーマ保存", () => {
+  it("選択したテンプレートの有効設定を管理者確認付きRPCへ渡す", async () => {
+    await updateAlbumPresentation({
+      albumID: "album-1",
+      coverPhotoID: null,
+      visibility: "private",
+      icon: "travel",
+      themeColor: "#4d86a8",
+      tags: ["旅行"],
+      templateID: "travel",
+    });
+
+    expect(rpc).toHaveBeenCalledWith(
+      "update_album_presentation_v2",
+      expect.objectContaining({
+        p_album_id: "album-1",
+        p_theme_template_id: "travel",
+        p_theme_settings: expect.objectContaining({
+          schemaVersion: 1,
+          themeColor: "#4d86a8",
+          albumIcon: "travel",
+          initialTags: ["旅行"],
+        }),
+      }),
+    );
   });
 });

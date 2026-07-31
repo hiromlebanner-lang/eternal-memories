@@ -20,12 +20,42 @@ it("06 アルバムを作成して入力値を渡す", async () => {
   );
 
   await user.click(screen.getByRole("button", { name: /新しいアルバム/ }));
+  expect(
+    screen.getByRole("button", { name: /標準（Eternal memories）/ }),
+  ).toHaveAttribute("aria-pressed", "true");
   await user.type(screen.getByLabelText("アルバム名"), "  北海道旅行  ");
   await user.type(screen.getByLabelText("説明"), "  夏の思い出  ");
   await user.click(screen.getByRole("button", { name: /アルバムを作成/ }));
 
-  expect(onCreate).toHaveBeenCalledWith("北海道旅行", "夏の思い出");
+  expect(onCreate).toHaveBeenCalledWith(
+    "北海道旅行",
+    "夏の思い出",
+    "standard",
+  );
   expect(onClose).toHaveBeenCalled();
+});
+
+it("選択したテーマテンプレートをアルバム作成へ渡す", async () => {
+  const user = userEvent.setup();
+  const onCreate = vi.fn(async () => {});
+  render(
+    <AlbumManager
+      albums={[]}
+      currentUserID="user-1"
+      onClose={vi.fn()}
+      onSelect={vi.fn()}
+      onCreate={onCreate}
+      onJoin={vi.fn(async () => {})}
+      onDelete={vi.fn(async () => {})}
+    />,
+  );
+
+  await user.click(screen.getByRole("button", { name: /新しいアルバム/ }));
+  await user.click(screen.getByRole("button", { name: /^DIY/ }));
+  await user.type(screen.getByLabelText("アルバム名"), "作品集");
+  await user.click(screen.getByRole("button", { name: /アルバムを作成/ }));
+
+  expect(onCreate).toHaveBeenCalledWith("作品集", "", "diy");
 });
 
 it("Supabaseの構造化エラーを省略せず表示する", async () => {

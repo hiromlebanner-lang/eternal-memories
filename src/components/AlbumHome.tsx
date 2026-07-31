@@ -23,6 +23,7 @@ import {
   type CSSProperties,
 } from "react";
 import type { Album, AlbumPhoto, AlbumSort } from "../types";
+import { AlbumThemeIcon } from "./AlbumThemePicker";
 
 const ROLE_LABEL: Record<Album["role"], string> = {
   owner: "オーナー",
@@ -129,7 +130,9 @@ function AlbumCard({
               : undefined
           }
         >
-          {!album.cover_url ? <Images size={30} aria-hidden="true" /> : null}
+          {!album.cover_url ? (
+            <AlbumThemeIcon icon={album.icon} size={30} />
+          ) : null}
           <span className="album-card__visibility">
             {VISIBILITY_LABEL[album.visibility ?? "private"]}
           </span>
@@ -620,7 +623,9 @@ export function AlbumHome({
                       : { background: album.theme_color ?? "#c65476" }
                   }
                 >
-                  {!album.cover_url ? <Images size={15} /> : null}
+                  {!album.cover_url ? (
+                    <AlbumThemeIcon icon={album.icon} size={15} />
+                  ) : null}
                 </span>
                 <strong>{album.name}</strong>
               </button>

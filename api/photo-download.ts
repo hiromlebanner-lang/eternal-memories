@@ -12,6 +12,68 @@ type PhotoRow = {
   captured_at: string;
 };
 
+type WatermarkTheme = {
+  position: "top-left" | "top-right" | "bottom-left" | "bottom-right";
+  size: number;
+  opacity: number;
+  backgroundOpacity: number;
+};
+
+const defaultWatermarkTheme: WatermarkTheme = {
+  position: "bottom-right",
+  size: 1,
+  opacity: 0.62,
+  backgroundOpacity: 0.22,
+};
+
+function numericSetting(
+  value: unknown,
+  fallback: number,
+  minimum: number,
+  maximum: number,
+) {
+  return typeof value === "number" && Number.isFinite(value)
+    ? Math.min(maximum, Math.max(minimum, value))
+    : fallback;
+}
+
+function readWatermarkTheme(value: unknown): WatermarkTheme {
+  if (!value || typeof value !== "object") return defaultWatermarkTheme;
+  const downloadImage = Reflect.get(value, "downloadImage");
+  if (!downloadImage || typeof downloadImage !== "object") {
+    return defaultWatermarkTheme;
+  }
+  const rawPosition = Reflect.get(downloadImage, "watermarkPosition");
+  const position =
+    rawPosition === "top-left" ||
+    rawPosition === "top-right" ||
+    rawPosition === "bottom-left" ||
+    rawPosition === "bottom-right"
+      ? rawPosition
+      : defaultWatermarkTheme.position;
+  return {
+    position,
+    size: numericSetting(
+      Reflect.get(downloadImage, "watermarkSize"),
+      defaultWatermarkTheme.size,
+      0.75,
+      1.35,
+    ),
+    opacity: numericSetting(
+      Reflect.get(downloadImage, "watermarkOpacity"),
+      defaultWatermarkTheme.opacity,
+      0.35,
+      0.8,
+    ),
+    backgroundOpacity: numericSetting(
+      Reflect.get(downloadImage, "backgroundOpacity"),
+      defaultWatermarkTheme.backgroundOpacity,
+      0.1,
+      0.4,
+    ),
+  };
+}
+
 function sendJSON(response: ServerResponse, status: number, message: string) {
   response.statusCode = status;
   response.setHeader("Content-Type", "application/json; charset=utf-8");
@@ -56,7 +118,10 @@ function outputFileName(extension: string, capturedAt: string) {
   return `Eternal-memories_${stamp}.${extension}`;
 }
 
-export async function addWatermark(input: Buffer) {
+export async function addWatermark(
+  input: Buffer,
+  theme: WatermarkTheme = defaultWatermarkTheme,
+) {
   const metadata = await sharp(input, { failOn: "none" }).metadata();
   const rotated =
     metadata.orientation !== undefined &&
@@ -67,22 +132,26 @@ export async function addWatermark(input: Buffer) {
   if (!width || !height) throw new Error("Image dimensions are unavailable");
 
   const shortSide = Math.min(width, height);
-  const fontSize = Math.round(Math.max(18, Math.min(54, shortSide * 0.035)));
+  const fontSize = Math.round(
+    Math.max(18, Math.min(54, shortSide * 0.035)) * theme.size,
+  );
   const padding = Math.round(Math.max(8, fontSize * 0.42));
   const margin = Math.round(Math.max(14, shortSide * 0.025));
   const textWidth = Math.round(fontSize * 8.9);
   const boxWidth = textWidth + padding * 2;
   const boxHeight = fontSize + padding * 1.65;
-  const boxX = Math.max(margin, width - margin - boxWidth);
-  const boxY = Math.max(margin, height - margin - boxHeight);
+  const onLeft = theme.position.endsWith("left");
+  const onTop = theme.position.startsWith("top");
+  const boxX = onLeft ? margin : Math.max(margin, width - margin - boxWidth);
+  const boxY = onTop ? margin : Math.max(margin, height - margin - boxHeight);
   const textX = boxX + padding;
   const textY = boxY + padding + fontSize * 0.78;
   const overlay = Buffer.from(`
     <svg width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">
       <rect x="${boxX}" y="${boxY}" width="${boxWidth}" height="${boxHeight}"
-        rx="${padding}" fill="rgba(0,0,0,0.22)" />
+        rx="${padding}" fill="rgba(0,0,0,${theme.backgroundOpacity})" />
       <text x="${textX}" y="${textY}" font-family="Arial, Helvetica, sans-serif"
-        font-size="${fontSize}" font-weight="600" fill="rgba(255,255,255,0.62)"
+        font-size="${fontSize}" font-weight="600" fill="rgba(255,255,255,${theme.opacity})"
         stroke="rgba(0,0,0,0.20)" stroke-width="1">Eternal memories</text>
     </svg>
   `);
@@ -190,6 +259,18 @@ export default async function handler(
       return;
     }
 
+    let watermarkTheme = defaultWatermarkTheme;
+    const { data: albumTheme, error: albumThemeError } = await client
+      .from("albums")
+      .select("theme_settings")
+      .eq("id", photo.album_id)
+      .maybeSingle();
+    if (!albumThemeError) {
+      watermarkTheme = readWatermarkTheme(albumTheme?.theme_settings);
+    } else if (albumThemeError.code !== "42703") {
+      throw albumThemeError;
+    }
+
     const { data: signed, error: signedError } = await client.storage
       .from("album-photos")
       .createSignedUrl(photo.storage_path, 30);
@@ -205,6 +286,7 @@ export default async function handler(
     }
     const result = await addWatermark(
       Buffer.from(await sourceResponse.arrayBuffer()),
+      watermarkTheme,
     );
 
     response.statusCode = 200;

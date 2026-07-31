@@ -1,3 +1,8 @@
+import type {
+  AlbumThemeSettings,
+  AlbumThemeTemplateID,
+} from "./lib/albumThemes";
+
 export type AlbumRole = "owner" | "admin" | "member" | "viewer";
 
 export type PhotoCategory =
@@ -35,6 +40,8 @@ export interface Album {
   visibility?: "private" | "limited" | "public";
   icon?: string;
   theme_color?: string;
+  theme_template_id?: AlbumThemeTemplateID | null;
+  theme_settings?: AlbumThemeSettings | null;
   is_favorite?: boolean;
   tags?: string[];
   member_names?: string[];

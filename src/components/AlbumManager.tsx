@@ -8,8 +8,13 @@ import {
   Users,
 } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import {
+  DEFAULT_ALBUM_THEME_ID,
+  type AlbumThemeTemplateID,
+} from "../lib/albumThemes";
 import type { Album } from "../types";
 import { formatErrorMessage } from "../lib/errors";
+import { AlbumThemePicker } from "./AlbumThemePicker";
 import { Modal } from "./Modal";
 
 interface AlbumManagerProps {
@@ -18,7 +23,11 @@ interface AlbumManagerProps {
   selectedAlbumID?: string;
   onClose: () => void;
   onSelect: (albumID: string) => void;
-  onCreate: (name: string, description: string) => Promise<void>;
+  onCreate: (
+    name: string,
+    description: string,
+    templateID: AlbumThemeTemplateID,
+  ) => Promise<void>;
   onJoin: (code: string) => Promise<void>;
   onDelete: (albumID: string) => Promise<void>;
 }
@@ -36,6 +45,9 @@ export function AlbumManager({
   const [action, setAction] = useState<"list" | "create" | "join">("list");
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [templateID, setTemplateID] = useState<AlbumThemeTemplateID>(
+    DEFAULT_ALBUM_THEME_ID,
+  );
   const [code, setCode] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -46,7 +58,7 @@ export function AlbumManager({
     setBusy(true);
     setError("");
     try {
-      await onCreate(name.trim(), description.trim());
+      await onCreate(name.trim(), description.trim(), templateID);
       onClose();
     } catch (caught) {
       setError(formatErrorMessage(caught, "作成できませんでした。"));
@@ -191,6 +203,15 @@ export function AlbumManager({
               maxLength={300}
             />
           </label>
+          <section className="album-theme-section">
+            <div>
+              <strong>テーマテンプレート</strong>
+              <small>ロゴ・色・アイコン・保存画像の設定をまとめて適用します</small>
+            </div>
+            <AlbumThemePicker value={templateID} onChange={(next) => {
+              if (next) setTemplateID(next);
+            }} />
+          </section>
           {error ? <p className="form-message form-message--error">{error}</p> : null}
           <button className="primary-button" type="submit" disabled={busy}>
             <Plus size={18} />

@@ -1,6 +1,12 @@
 import { Check, Image, Palette, Save, Tags } from "lucide-react";
 import { useState, type FormEvent } from "react";
+import {
+  getAlbumThemeTemplate,
+  isAlbumThemeTemplateID,
+  type AlbumThemeTemplateID,
+} from "../lib/albumThemes";
 import type { Album, AlbumPhoto } from "../types";
+import { AlbumThemePicker } from "./AlbumThemePicker";
 import { Modal } from "./Modal";
 
 interface AlbumSettingsPanelProps {
@@ -13,6 +19,7 @@ interface AlbumSettingsPanelProps {
     icon: string;
     themeColor: string;
     tags: string[];
+    templateID: AlbumThemeTemplateID | null;
   }) => Promise<void>;
 }
 
@@ -34,6 +41,11 @@ export function AlbumSettingsPanel({
     album.theme_color ?? "#c65476",
   );
   const [tags, setTags] = useState((album.tags ?? []).join("、"));
+  const [templateID, setTemplateID] = useState<AlbumThemeTemplateID | null>(
+    isAlbumThemeTemplateID(album.theme_template_id)
+      ? album.theme_template_id
+      : null,
+  );
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -48,6 +60,7 @@ export function AlbumSettingsPanel({
         icon,
         themeColor,
         tags: tags.split(/[、,\s]+/).filter(Boolean),
+        templateID,
       });
       onClose();
     } catch (caught) {
@@ -104,6 +117,39 @@ export function AlbumSettingsPanel({
           </div>
         </section>
 
+        <section className="album-theme-section">
+          <div className="section-heading">
+            <Palette size={18} />
+            <span>
+              <strong>テーマテンプレート</strong>
+              <small>変更しても写真・コメント・位置情報は変わりません</small>
+            </span>
+          </div>
+          <AlbumThemePicker
+            value={templateID}
+            preserveCurrent={!album.theme_template_id}
+            disabled={!canManage}
+            onChange={(nextTemplateID) => {
+              setTemplateID(nextTemplateID);
+              if (!nextTemplateID) return;
+              const template = getAlbumThemeTemplate(nextTemplateID);
+              setThemeColor(template.settings.themeColor);
+              setIcon(template.settings.albumIcon);
+              setTags((current) => {
+                const currentTags = current
+                  .split(/[、,\s]+/)
+                  .filter(Boolean);
+                return [
+                  ...new Set([
+                    ...currentTags,
+                    ...template.settings.initialTags,
+                  ]),
+                ].join("、");
+              });
+            }}
+          />
+        </section>
+
         <section className="album-settings-panel__grid">
           <label className="field">
             <span>公開範囲</span>
@@ -143,6 +189,10 @@ export function AlbumSettingsPanel({
               <option value="heart">大切な人</option>
               <option value="work">仕事</option>
               <option value="star">お気に入り</option>
+              <option value="diy">DIY</option>
+              <option value="event">イベント</option>
+              <option value="sassen">SASSEN</option>
+              <option value="other">その他</option>
             </select>
           </label>
         </section>
